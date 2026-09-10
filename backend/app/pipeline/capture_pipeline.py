@@ -132,6 +132,13 @@ def run_capture(
     if cleaned:
         _organize_note(db, note)
 
+    # --- 7. index + derive (Phase 4/5, Team Member 3) ----------------------
+    # Runs after organization so the indexed metadata carries the topic the
+    # note was just filed under, and after understanding so reminders and
+    # contacts can read the entities it extracted.
+    if cleaned:
+        _index_and_derive(db, note)
+
     logger.info(
         "capture pipeline finished note=%s in %.2fs",
         note.id,
@@ -172,6 +179,7 @@ def run_understanding_on_text(
         _store_understanding(db, note, result)
         if cleaned:
             _organize_note(db, note)
+            _index_and_derive(db, note)
     return note, result
 
 
@@ -207,6 +215,26 @@ def _organize_note(db: Session, note: Note) -> None:
         organize(db, note)
     except Exception:
         logger.exception("organization failed for note %s; note kept unfiled", note.id)
+
+
+def _index_and_derive(db: Session, note: Note) -> None:
+    """Phase 4/5 hand-off (Team Member 3): make the note searchable, and derive
+    the reminders and contacts it implies.
+
+    Three separate concerns, each independently wrapped, for the same reason
+    `_run_understanding` and `_organize_note` are: none of them is allowed to
+    be the reason a capture the user already spoke is lost. A note that fails
+    to index is still stored, still filed and still readable - it is only
+    temporarily unfindable by search, and `POST /retrieval/reindex` repairs
+    that. A note whose reminder detection fails simply has no reminder.
+    """
+    from app.rag.indexer import index_note_safe
+    from app.reminders.contacts import link_contacts_safe
+    from app.reminders.service import create_reminders_safe
+
+    index_note_safe(db, note)
+    create_reminders_safe(db, note)
+    link_contacts_safe(db, note)
 
 
 def _store_understanding(db: Session, note: Note, result) -> None:
