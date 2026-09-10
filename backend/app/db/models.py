@@ -180,6 +180,14 @@ class Note(Base):
     )
     topic: Mapped[Topic | None] = relationship(back_populates="notes")
 
+    # --- Phase 5 (Team Member 3): derived reminders and person mentions ---
+    reminders: Mapped[list[Reminder]] = relationship(
+        back_populates="note", cascade="all, delete-orphan"
+    )
+    contact_links: Mapped[list[NoteContact]] = relationship(
+        back_populates="note", cascade="all, delete-orphan"
+    )
+
 
 class Understanding(Base):
     """Phase 2 result for a note: classification plus quality scoring."""
@@ -237,3 +245,123 @@ class Entity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     note: Mapped[Note] = relationship(back_populates="entities")
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: reminders and contacts (Team Member 3)
+#
+# Both tables hang off `notes` and neither is required for a note to exist:
+# reminder and contact detection runs after understanding, is wrapped in the
+# same try/except as every other post-capture stage, and a failure there leaves
+# the note untouched. `Reminder.note_id` and the link table use CASCADE, so
+# deleting a note takes its derived reminders and mentions with it - they have
+# no meaning without the note they came from.
+#
+# `Contact` is deliberately thin. The brief was explicitly "keep this simple;
+# do not build a full contact-management application", so this stores just
+# enough to recognise the same person across notes and to offer an action.
+# ---------------------------------------------------------------------------
+
+
+class ReminderStatus(str, Enum):
+    PENDING = "pending"
+    DONE = "done"
+    DISMISSED = "dismissed"
+
+
+class ReminderSource(str, Enum):
+    DETECTED = "detected"  # found in a note by the extraction pipeline
+    MANUAL = "manual"      # created through the API
+
+
+class Reminder(Base):
+    """A task with a time, derived from a note or created directly.
+
+    `note_id` is nullable so a reminder can be created on its own, but in
+    practice almost all of them come from a note - which is why `source` and
+    `confidence` are recorded: a reminder built from a 0.6-confidence "next
+    Friday" should be presented differently from one the user typed.
+    """
+
+    __tablename__ = "reminders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    note_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    title: Mapped[str] = mapped_column(Text)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default=ReminderStatus.PENDING.value, index=True
+    )
+
+    source: Mapped[str] = mapped_column(String(20), default=ReminderSource.DETECTED.value)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    #: The phrase the date came from ("next Friday"), kept so the reminder can
+    #: be spoken back the way it was said and so a wrong parse is diagnosable.
+    detected_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )
+
+    note: Mapped[Note | None] = relationship(back_populates="reminders")
+
+
+class Contact(Base):
+    """A person mentioned in notes.
+
+    `normalized_name` is the lowercased match key and is unique, so "Professor
+    Raman" and "professor raman" are one contact rather than two. Fuzzy matching
+    on top of that lives in `app/reminders/contacts.py`, because ASR spelling
+    varies between captures of the same name.
+    """
+
+    __tablename__ = "contacts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200))
+    normalized_name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )
+
+    mentions: Mapped[list[NoteContact]] = relationship(
+        back_populates="contact", cascade="all, delete-orphan"
+    )
+
+
+class NoteContact(Base):
+    """Which notes mention which people.
+
+    A link table rather than a column, because one note mentions several people
+    and one person appears across many notes - and "what did I note about
+    Sarah" needs the second direction.
+    """
+
+    __tablename__ = "note_contacts"
+    __table_args__ = (
+        UniqueConstraint("note_id", "contact_id", name="uq_note_contact"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    note_id: Mapped[str] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), index=True
+    )
+    contact_id: Mapped[str] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"), index=True
+    )
+    #: The exact surface form in this note, which may differ from the canonical
+    #: contact name ("Prof. Raman" vs "Professor Raman").
+    mention_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    note: Mapped[Note] = relationship(back_populates="contact_links")
+    contact: Mapped[Contact] = relationship(back_populates="mentions")
