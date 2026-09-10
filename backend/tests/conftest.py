@@ -31,6 +31,16 @@ os.environ["DUMMY_AUDIO_PATH"] = str(_FIXTURE_WAV)
 os.environ["LLM_PROVIDER"] = "null"
 os.environ["ANTHROPIC_API_KEY"] = ""
 
+# Phase 4 (Team Member 3). The in-memory vector store keeps the suite fast and
+# hermetic: no Chroma client to build (~1s), nothing written to disk, no state
+# leaking between tests. The real ChromaDB backend is exercised directly by
+# tests/test_rag_retrieval.py, which constructs it against a tmp path.
+os.environ["VECTOR_STORE"] = "memory"
+os.environ["EMBEDDING_BACKEND"] = "hashed"
+os.environ["CHROMA_DIR"] = str(_TMP / "chroma")
+os.environ["TTS_ENGINE"] = "directive"
+os.environ["TTS_OUTPUT_DIR"] = str(_TMP / "tts")
+
 
 def _write_silent_wav(path: Path, seconds: float = 1.0, rate: int = 16_000) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,15 +117,41 @@ def fake_transcriber():
 
 @pytest.fixture(autouse=True)
 def clean_database():
-    """Start every test with empty tables."""
+    """Start every test with empty tables and an empty vector index.
+
+    The vector store is a process-level cached singleton, so unlike the
+    database it is not reset by clearing tables - a note indexed by one test
+    would still be retrievable in the next one.
+    """
     from app.db.models import Base
     from app.db.session import engine, init_db
+    from app.rag.vector_store import get_vector_store
 
     init_db()
+    get_vector_store().clear()
     yield
     with engine.begin() as connection:
         for table in reversed(Base.metadata.sorted_tables):
             connection.exec_driver_sql(f"DELETE FROM {table.name}")
+    get_vector_store().clear()
+
+
+@pytest.fixture
+def make_note(db_session):
+    """Create a stored, understood, organized, indexed note from text.
+
+    Runs the same `run_understanding_on_text` path the /understand endpoint
+    uses, so a test note goes through every stage a real one does - including
+    Team Member 2's topic assignment and Team Member 3's indexing.
+    """
+    from app.pipeline.capture_pipeline import run_understanding_on_text
+
+    def _make(text: str):
+        note, _result = run_understanding_on_text(db_session, text, persist=True)
+        db_session.commit()
+        return note
+
+    return _make
 
 
 @pytest.fixture
