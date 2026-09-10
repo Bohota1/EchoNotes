@@ -1,28 +1,81 @@
-"""Capture schemas - EchoNotes Feature 1."""
+"""Capture request/response schemas (Phase 1)."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import datetime
 
-from app.schemas.note import NoteOut
+from pydantic import BaseModel, ConfigDict, Field
 
-
-class CaptureStatus(BaseModel):
-    """Progress for a running capture, polled or streamed while a long lecture is processed."""
-
-    capture_id: str
-    stage: str  # transcribe | understand | organize | store | respond
-    progress: float
-    spoken: str  # what to announce right now, e.g. "Transcribing, chunk 4 of 12"
+from app.schemas.understanding import UnderstandingOut
 
 
-class CaptureResult(BaseModel):
-    capture_id: str
-    note: NoteOut
-    subject_name: str
-    topic_name: str
-    cluster_summary: str
-    detected_language: str | None
-    announcement: str
-    earcon: str | None
-    stage_timings: dict[str, float]
+class TriggerRequest(BaseModel):
+    """Body for POST /trigger. Every field is optional - an empty body is valid
+    and uses the configured capture source with auto language detection."""
+
+    source: str | None = Field(
+        default=None,
+        description="Capture source override: dummy | microphone. Defaults to CAPTURE_SOURCE.",
+    )
+    language: str | None = Field(
+        default=None,
+        description="ISO-639-1 hint for the recognizer. Omit to auto-detect.",
+    )
+    max_seconds: int | None = Field(
+        default=None, ge=1, le=3600, description="Recording length cap for live sources."
+    )
+    run_understanding: bool = Field(
+        default=True,
+        description="Run Phase 2 (entities, classification, quality). False = transcript only.",
+    )
+
+
+class TranscriptionOut(BaseModel):
+    """What the ASR stage reported about the recording."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str | None = None
+    language: str | None = None
+    language_probability: float | None = None
+    confidence: float = Field(description="0-1, derived from mean token log probability")
+    no_speech_probability: float | None = None
+    segment_count: int | None = None
+
+
+class CaptureResponse(BaseModel):
+    """Result of a capture. This is what POST /trigger returns."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    note_id: str
+    source: str
+    raw_transcript: str
+    cleaned_text: str
+    duration_seconds: float | None = None
+    audio_path: str | None = None
+    created_at: datetime
+    transcription: TranscriptionOut
+    understanding: UnderstandingOut | None = None
+
+
+class CaptureSourceOut(BaseModel):
+    """One registered capture source and whether it can run right now."""
+
+    name: str
+    available: bool
+    detail: str
+    is_default: bool
+
+
+class NoteSummary(BaseModel):
+    """Compact row for note listings."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    note_id: str
+    cleaned_text: str
+    source: str
+    note_type: str | None = None
+    quality_score: float | None = None
+    created_at: datetime
