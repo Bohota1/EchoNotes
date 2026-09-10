@@ -17,6 +17,14 @@ python-multipart>=0.0.9
 # ---- Storage [P1] ----
 SQLAlchemy>=2.0.36
 
+# ---- Hierarchy [P3] ----
+# Already an indirect dependency of faster-whisper/ctranslate2; listed
+# directly because app/hierarchy and app/understanding/organizer.py import it
+# for the dependency-free hashed-embedding similarity (see
+# app/hierarchy/embeddings.py and docs/hierarchy-handoff.md - no new
+# heavyweight ML dependency was added for Phase 3).
+numpy>=1.26
+
 # ---- Speech to text [P1] ----
 # faster-whisper bundles audio decoding through PyAV, so no separate ffmpeg
 # binary is required. It also exposes per-segment avg_logprob / no_speech_prob,
