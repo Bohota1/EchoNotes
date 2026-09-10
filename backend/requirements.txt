@@ -50,14 +50,38 @@ anthropic>=0.40.0
 pytest>=8.3.0
 httpx>=0.27.0
 
+# ---- Retrieval / RAG [P4] ----
+# The vector store. Persists under CHROMA_DIR and does metadata filtering in
+# the engine, which is what makes "about databases, from last week" a filtered
+# search rather than a re-ranking hack. Set VECTOR_STORE=memory to run without
+# it - the in-memory backend is brute-force numpy and needs nothing installed.
+chromadb>=0.5.0
+
+# ---------------------------------------------------------------------------
+# Optional extras. Nothing here is required: the system runs fully offline,
+# with no API key and no model download, on the defaults.
+# ---------------------------------------------------------------------------
+
+# Semantic embeddings for retrieval. EMBEDDING_BACKEND=hashed (the default)
+# reuses the dependency-free hashed bag-of-words vectorizer and needs none of
+# this. Installing sentence-transformers pulls in torch (~500MB-2GB) plus a
+# ~90MB model download on first use, which is why it is opt-in rather than a
+# hard requirement - see docs/retrieval-handoff.md, "Assumptions and open
+# items". With it installed, set EMBEDDING_BACKEND=sentence-transformers and
+# run POST /retrieval/reindex.
+# sentence-transformers>=3.0
+
+# Server-side TTS. TTS_ENGINE=directive (the default) returns speech
+# instructions the browser speaks with the Web Speech API, which uses the
+# user's own configured voice and rate. Install this only if you need an
+# actual audio file for a headless demo, then set TTS_ENGINE=pyttsx3.
+# pyttsx3>=2.90
+
 # ---------------------------------------------------------------------------
 # Owned by other team members - uncomment when that work starts.
 # ---------------------------------------------------------------------------
-# chromadb>=0.5.0            # RAG vector store
-# sentence-transformers      # embeddings
 # nltk>=3.9                  # lemmatisation, collocations
 # gensim>=4.3                # word2vec
 # scikit-learn>=1.6          # LDA topic modelling
 # networkx>=3.4              # summarisation graph
 # pytesseract, Pillow        # OCR capture
-# pyttsx3                    # server-side TTS fallback
