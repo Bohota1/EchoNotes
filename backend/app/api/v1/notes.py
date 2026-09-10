@@ -49,5 +49,12 @@ def delete_note(note_id: str, db: Session = Depends(get_db)) -> Response:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"no note with id {note_id}"
         )
+    # Phase 4 (Team Member 3): drop the note's vectors too. SQLite is
+    # authoritative, so an orphaned vector would surface a note that no longer
+    # exists - the retriever skips those defensively, but leaving them behind
+    # would grow the index forever.
+    from app.rag.indexer import remove_note
+
+    remove_note(note_id)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
