@@ -9,6 +9,7 @@ from __future__ import annotations
 from app.asr.transcriber import logprob_to_confidence
 from app.db.models import Note
 from app.schemas.capture import CaptureResponse, NoteSummary, TranscriptionOut
+from app.schemas.note import NoteOut
 from app.schemas.understanding import (
     ClassificationOut,
     EntityOut,
@@ -88,4 +89,31 @@ def note_summary(note: Note) -> NoteSummary:
         note_type=note.understanding.note_type if note.understanding else None,
         quality_score=note.understanding.quality_score if note.understanding else None,
         created_at=note.created_at,
+    )
+
+
+# --- Phase 3: hierarchy-facing note serialization --------------------------
+
+
+def note_out(note: Note) -> NoteOut:
+    """A note as it appears inside the hierarchy (`TopicOut.notes`,
+    `GET /hierarchy/topics/{id}/notes`, note-move responses). Distinct from
+    `note_summary()` below, which backs the flat `/notes` listing and does
+    not know about topics.
+
+    `note.source` (Phase 1's `CaptureSource`) is reconciled with the Phase 3
+    `NoteSource` schema by `app.hierarchy.service.note_source_label` - the one
+    place that mapping lives, also used when building the outline tree.
+    """
+    from app.hierarchy.service import note_source_label
+
+    return NoteOut(
+        id=note.id,
+        topic_id=note.topic_id or "",
+        text=note.cleaned_text,
+        note_type=(note.understanding.note_type if note.understanding else "academic"),
+        source=note_source_label(note.source),
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+        quality_score=note.understanding.quality_score if note.understanding else None,
     )
