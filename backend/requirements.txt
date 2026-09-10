@@ -1,0 +1,51 @@
+# ---- Web ----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.20
+
+# ---- Storage ----
+SQLAlchemy==2.0.36
+chromadb==0.5.23
+
+# ---- LNT paper 1: audio (Section 3.3) ----
+pydub==0.25.1
+SpeechRecognition==3.12.0
+sounddevice==0.5.1
+soundfile==0.12.1
+numpy==2.2.1
+matplotlib==3.10.0
+
+# ---- LNT paper 1: language + NLP (Sections 3.2, 3.4) ----
+googletrans==4.0.2
+langdetect==1.0.9
+nltk==3.9.1
+gensim==4.3.3
+scikit-learn==1.6.0
+networkx==3.4.2
+inflect==7.4.0
+textstat==0.7.4
+
+# ---- Retrieval (Feature 4) ----
+sentence-transformers==3.3.1
+
+# ---- OCR (Feature 7) ----
+pytesseract==0.3.13
+Pillow==11.0.0
+
+# ---- Reminders (Feature 5) ----
+dateparser==1.2.0
+phonenumbers==8.13.52
+
+# ---- LLM providers (cluster summaries, classification, RAG answers) ----
+anthropic==0.42.0
+
+# ---- Server-side TTS fallback ----
+pyttsx3==2.98
+
+# ---- Dev ----
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
+ruff==0.8.6

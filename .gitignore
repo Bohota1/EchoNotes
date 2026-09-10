@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env & secrets
+.env
+.env.local
+
+# Runtime data
+backend/data/audio_raw/*
+backend/data/audio_processed/*
+backend/data/transcripts/*
+backend/data/images/*
+backend/data/chroma/*
+!backend/data/**/.gitkeep
+*.db
+*.sqlite3
+
+# NLTK / model caches
+nltk_data/
+.cache/
+
+# OS
+Thumbs.db
+.DS_Store

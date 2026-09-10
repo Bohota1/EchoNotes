@@ -1,0 +1,94 @@
+/*
+ * Base styles.
+ *
+ * EchoNotes' primary users are blind or low vision, so the visual layer serves two audiences:
+ * low-vision users with usable sight, and sighted collaborators looking over a shoulder. That
+ * means the rules below are requirements, not preferences.
+ *
+ *   - Never remove focus outlines. :focus-visible is styled up, never off.
+ *   - Text scales with rem so browser zoom and OS text size work.
+ *   - Contrast at least 7:1 for body text (WCAG AAA), 4.5:1 for large text.
+ *   - Respect prefers-reduced-motion; nothing animates that carries meaning.
+ *   - Nothing is conveyed by colour alone: note type is a word, not just a hue.
+ *   - .visually-hidden exposes text to screen readers without showing it.
+ */
+
+:root {
+  --bg: #ffffff;
+  --fg: #16181d;
+  --muted: #4a4f5a;
+  --border: #c7ccd6;
+  --accent: #0b4fd8;
+  --focus: #0b4fd8;
+  --danger: #a3101a;
+  --recording: #a3101a;
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-size: 1.0625rem;
+  --line-height: 1.6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101215;
+    --fg: #f2f4f8;
+    --muted: #b8bfcc;
+    --border: #3a414d;
+    --accent: #8ab4ff;
+    --focus: #8ab4ff;
+    --danger: #ff8a8a;
+    --recording: #ff8a8a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Visible once focused, so a keyboard user can jump past the header. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 0.75rem;
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
