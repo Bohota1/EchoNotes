@@ -1,47 +1,53 @@
-"""Note endpoints - Idea11y Section 4.2 (Design Goal 2).
+"""Note read endpoints.
 
-The paper's requirement is that a user can add, edit, delete and move a note **from inside the
-outline**, never having to leave it for a separate dialog. These endpoints are the server half of
-that: one call per action, each returning enough for the client to re-render and announce.
+Write operations on notes (create/edit/move within a hierarchy) belong to the
+hierarchy work and are not defined here.
+
+    GET /api/v1/notes            recent notes, newest first
+    GET /api/v1/notes/{note_id}  one note with its transcripts and understanding
 """
 
-from fastapi import APIRouter
+from __future__ import annotations
 
-from app.schemas.note import NoteCreate, NoteInfo, NoteMove, NoteOut, NoteUpdate
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.orm import Session
+
+from app.api.v1.serializers import capture_response, note_summary
+from app.db.repositories import NoteRepository
+from app.db.session import get_db
+from app.schemas.capture import CaptureResponse, NoteSummary
 
 router = APIRouter()
 
 
-@router.post("", response_model=NoteOut)
-async def create_note(payload: NoteCreate):
-    """Add a note under a topic (Ctrl+Alt+N, or the Add button in each cluster)."""
-    raise NotImplementedError
+@router.get("", response_model=list[NoteSummary], summary="List notes")
+def list_notes(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[NoteSummary]:
+    return [note_summary(n) for n in NoteRepository(db).list(limit=limit, offset=offset)]
 
 
-@router.get("/{note_id}", response_model=NoteOut)
-async def get_note(note_id: str):
-    raise NotImplementedError
+@router.get("/{note_id}", response_model=CaptureResponse, summary="Get one note")
+def get_note(note_id: str, db: Session = Depends(get_db)) -> CaptureResponse:
+    note = NoteRepository(db).get(note_id)
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"no note with id {note_id}"
+        )
+    return capture_response(note)
 
 
-@router.patch("/{note_id}", response_model=NoteOut)
-async def update_note(note_id: str, payload: NoteUpdate):
-    """Edit in place (Ctrl+Alt+E). Marks the parent topic's summary stale."""
-    raise NotImplementedError
-
-
-@router.post("/{note_id}/move", response_model=NoteOut)
-async def move_note(note_id: str, payload: NoteMove):
-    """Re-file into another topic (Ctrl+Alt+M). Marks both topics' summaries stale."""
-    raise NotImplementedError
-
-
-@router.delete("/{note_id}")
-async def delete_note(note_id: str):
-    """Delete (Ctrl+Alt+D). The client confirms first and announces where focus went."""
-    raise NotImplementedError
-
-
-@router.get("/{note_id}/info", response_model=NoteInfo)
-async def note_info(note_id: str):
-    """Note info (Ctrl+Alt+I) - Idea11y's creator-and-colour announcement, adapted."""
-    raise NotImplementedError
+@router.delete(
+    "/{note_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_note(note_id: str, db: Session = Depends(get_db)) -> Response:
+    if not NoteRepository(db).delete(note_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"no note with id {note_id}"
+        )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

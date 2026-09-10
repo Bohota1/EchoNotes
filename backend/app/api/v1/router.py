@@ -1,15 +1,20 @@
-"""API v1 router."""
+"""API v1 router.
+
+Only the routes owned by the capture + understanding pipeline are mounted.
+
+`hierarchy.py`, `retrieval.py`, `analysis.py`, `reminders.py`, `ocr.py` and
+`settings.py` still exist in this package as unimplemented stubs owned by other
+team members. They are deliberately NOT mounted here - an endpoint that 500s on
+every call is worse than one that 404s - so whoever implements them adds the
+`include_router` line along with the implementation.
+"""
 
 from fastapi import APIRouter
 
-from app.api.v1 import analysis, capture, hierarchy, notes, ocr, reminders, retrieval, settings
+from app.api.v1 import capture, notes
 
 api_router = APIRouter()
-api_router.include_router(capture.router, prefix="/capture", tags=["capture"])
+
+# No prefix: this module owns /trigger, /understand and /capture/sources.
+api_router.include_router(capture.router, tags=["capture"])
 api_router.include_router(notes.router, prefix="/notes", tags=["notes"])
-api_router.include_router(hierarchy.router, prefix="/hierarchy", tags=["hierarchy"])
-api_router.include_router(retrieval.router, prefix="/retrieval", tags=["retrieval"])
-api_router.include_router(analysis.router, prefix="/analysis", tags=["analysis"])
-api_router.include_router(reminders.router, prefix="/reminders", tags=["reminders"])
-api_router.include_router(ocr.router, prefix="/ocr", tags=["ocr"])
-api_router.include_router(settings.router, prefix="/settings", tags=["settings"])

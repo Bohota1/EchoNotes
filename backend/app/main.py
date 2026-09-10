@@ -1,6 +1,6 @@
 """FastAPI entry point.
 
-Run with:  uvicorn app.main:app --reload
+    uvicorn app.main:app --reload
 """
 
 from contextlib import asynccontextmanager
@@ -11,26 +11,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.config import get_settings
 from app.core.logging import configure_logging
+from app.db.session import init_db
+
+settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create data directories, initialise the database and warm the vector store."""
     configure_logging()
-    # TODO: init_db(); ensure_data_dirs(); warm_vector_store()
+    init_db()
+    settings.audio_raw_dir.mkdir(parents=True, exist_ok=True)
+    settings.transcript_dir.mkdir(parents=True, exist_ok=True)
     yield
-    # TODO: close_vector_store()
 
-
-settings = get_settings()
 
 app = FastAPI(
     title="EchoNotes API",
     version="0.1.0",
     description=(
-        "Voice-first note capture and retrieval for blind and low-vision users. "
-        "Implements the LNT framework (Saini et al. 2023) and the hierarchical outline "
-        "of Idea11y (Li et al. 2026)."
+        "Voice capture and AI note understanding. "
+        "POST /api/v1/trigger records, transcribes, cleans, understands and stores a note."
     ),
     lifespan=lifespan,
 )
@@ -47,5 +47,21 @@ app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["meta"])
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict:
+    """Liveness plus the two facts that most often explain a failing capture."""
+    from app.capture.sources import get_capture_source
+    from app.llm import get_llm_client
+
+    try:
+        available, detail = get_capture_source().is_available()
+    except Exception as exc:
+        available, detail = False, str(exc)
+
+    return {
+        "status": "ok",
+        "capture_source": settings.capture_source,
+        "capture_available": available,
+        "capture_detail": detail,
+        "asr_model": settings.whisper_model,
+        "llm_available": get_llm_client().available,
+    }
