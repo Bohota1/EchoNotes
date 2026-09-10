@@ -90,6 +90,60 @@ class Settings(BaseSettings):
     rollup_summary_max_words: int = 60
     range_summary_max_words: int = 80
 
+    # ---- Retrieval / RAG (Phase 4, Team Member 3) ----
+    # Embeddings. "hashed" reuses Team Member 2's dependency-free hashed
+    # bag-of-words vectorizer (app/hierarchy/embeddings.py) so the project keeps
+    # working with no downloads and no API key. "sentence-transformers" is the
+    # opt-in semantic backend - it is NOT a hard requirement; see
+    # requirements.txt. Switching backends invalidates the index: run
+    # POST /retrieval/reindex afterwards, because vectors from two different
+    # models are not comparable.
+    embedding_backend: str = "hashed"  # hashed | sentence-transformers
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+    # Vector store. "chroma" persists under chroma_dir; "memory" is brute-force
+    # numpy with no persistence (what the test suite uses).
+    vector_store: str = "chroma"  # chroma | memory
+    chroma_dir: Path = BASE_DIR / "data" / "chroma"
+
+    # Chunking. A short voice note is one chunk; a lecture is windowed, because
+    # one vector over 2000 words averages away the specifics that make a note
+    # findable.
+    rag_chunk_chars: int = 900
+    rag_chunk_overlap: int = 120
+
+    # Retrieval. `rag_vector_weight` splits the hybrid score between the vector
+    # and lexical passes; `rag_min_score` drops weak matches so an unrelated
+    # note never becomes a citation.
+    rag_top_k: int = 5
+    rag_min_score: float = 0.08
+    rag_vector_weight: float = 0.65
+    rag_chunk_overfetch: int = 3
+    rag_lexical_scan_limit: int = 300
+
+    # Answer generation.
+    rag_context_max_chars: int = 6000
+    rag_answer_max_words: int = 45
+    rag_summary_max_words: int = 90
+    rag_answer_max_tokens: int = 600
+
+    # ---- Text to speech (Phase 4, Team Member 3) ----
+    # "directive" returns structured speech instructions for the browser's Web
+    # Speech API - the default, because it uses the blind user's own configured
+    # voice and speech rate. "pyttsx3" additionally synthesises a wav server-side
+    # and returns a file reference, for headless demos.
+    tts_engine: str = "directive"  # directive | pyttsx3
+    tts_output_dir: Path = BASE_DIR / "data" / "tts"
+    tts_rate: int = 180
+    tts_voice_coding: str = "consistent"  # consistent | by_type
+
+    # ---- Reminders & contacts (Phase 5, Team Member 3) ----
+    # A deadline entity below this confidence is surfaced as a suggestion rather
+    # than auto-created, so a mis-heard date never silently becomes a reminder.
+    reminder_auto_create_confidence: float = 0.60
+    reminder_lookahead_hours: int = 24
+    contact_match_cutoff: float = 0.82
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
