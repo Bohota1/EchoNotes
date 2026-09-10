@@ -126,6 +126,17 @@ def move_note(db, note_id: str, target_topic_id: str):
     if old_topic_id and old_topic_id != target_topic_id:
         topic_repo.mark_stale(old_topic_id)
     topic_repo.mark_stale(target_topic_id)
+
+    # Phase 4 (Team Member 3): the vector index stores each note's subject and
+    # topic so retrieval can filter on them. A move makes that copy stale, and
+    # a stale copy means "what did I write about X in <subject>" filters on
+    # where the note used to be. Refreshed here because this is the single
+    # choke point every move goes through - by id, by name, and by voice
+    # command. Never raises: a stale index is a worse search result, not a
+    # failed move.
+    from app.rag.indexer import reindex_note_metadata
+
+    reindex_note_metadata(db, note)
     return note, target
 
 
