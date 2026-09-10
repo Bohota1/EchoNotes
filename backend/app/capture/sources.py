@@ -25,7 +25,7 @@ import logging
 import uuid
 import wave
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import get_settings
@@ -138,7 +138,7 @@ class DummyCaptureSource(AudioCaptureSource):
             sample_rate=rate,
             channels=channels,
             source=self.name,
-            captured_at=datetime.now(UTC),
+            captured_at=datetime.now(timezone.utc),
         )
 
 
@@ -193,7 +193,7 @@ class MicrophoneCaptureSource(AudioCaptureSource):
             sample_rate=rate,
             channels=channels,
             source=self.name,
-            captured_at=datetime.now(UTC),
+            captured_at=datetime.now(timezone.utc),
         )
 
 
@@ -230,7 +230,7 @@ class UploadCaptureSource(AudioCaptureSource):
             sample_rate=rate,
             channels=channels,
             source=self.name,
-            captured_at=datetime.now(UTC),
+            captured_at=datetime.now(timezone.utc),
         )
 
 

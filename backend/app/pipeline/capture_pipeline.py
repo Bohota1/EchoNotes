@@ -124,6 +124,14 @@ def run_capture(
     if run_understanding and cleaned:
         _run_understanding(db, note, logprob_to_confidence(transcription.avg_logprob))
 
+    # --- 6. organize (Phase 3, Team Member 2) ------------------------------
+    # File the note into Subject -> Topic. Runs even when `run_understanding`
+    # is False (understanding only adds a note_type/quality signal that
+    # `organize()` does not currently require) so a transcript-only capture
+    # is still filed rather than left with `topic_id=None` forever.
+    if cleaned:
+        _organize_note(db, note)
+
     logger.info(
         "capture pipeline finished note=%s in %.2fs",
         note.id,
@@ -162,6 +170,8 @@ def run_understanding_on_text(
     result = understand(cleaned, transcription_confidence=transcription_confidence)
     if note is not None:
         _store_understanding(db, note, result)
+        if cleaned:
+            _organize_note(db, note)
     return note, result
 
 
@@ -181,6 +191,22 @@ def _run_understanding(db: Session, note: Note, transcription_confidence: float)
         _store_understanding(db, note, result)
     except Exception:
         logger.exception("understanding failed for note %s; transcript kept", note.id)
+
+
+def _organize_note(db: Session, note: Note) -> None:
+    """Phase 3 hand-off: file the note into Subject -> Topic
+    (`app.understanding.organizer.organize`, Team Member 2's work) once the
+    transcript exists. Wrapped in try/except for the same reason as
+    `_run_understanding`: organization must never be the reason a capture is
+    lost - a note that fails to file stays reachable via `GET /notes` with
+    `topic_id=None` rather than disappearing.
+    """
+    try:
+        from app.understanding.organizer import organize
+
+        organize(db, note)
+    except Exception:
+        logger.exception("organization failed for note %s; note kept unfiled", note.id)
 
 
 def _store_understanding(db: Session, note: Note, result) -> None:
