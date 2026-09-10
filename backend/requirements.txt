@@ -1,51 +1,55 @@
-# ---- Web ----
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
-pydantic-settings==2.7.0
-python-multipart==0.0.20
+# ---------------------------------------------------------------------------
+# EchoNotes backend requirements
+#
+# Sections marked [P1] / [P2] are needed by the capture + understanding
+# pipeline (Phase 1 and Phase 2). The block at the bottom belongs to the
+# hierarchy / RAG / TTS work owned by other team members and is intentionally
+# left commented out so the Phase 1-2 install stays small and reliable.
+# ---------------------------------------------------------------------------
 
-# ---- Storage ----
-SQLAlchemy==2.0.36
-chromadb==0.5.23
+# ---- Web [P1] ----
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+python-multipart>=0.0.9
 
-# ---- LNT paper 1: audio (Section 3.3) ----
-pydub==0.25.1
-SpeechRecognition==3.12.0
-sounddevice==0.5.1
-soundfile==0.12.1
-numpy==2.2.1
-matplotlib==3.10.0
+# ---- Storage [P1] ----
+SQLAlchemy>=2.0.36
 
-# ---- LNT paper 1: language + NLP (Sections 3.2, 3.4) ----
-googletrans==4.0.2
-langdetect==1.0.9
-nltk==3.9.1
-gensim==4.3.3
-scikit-learn==1.6.0
-networkx==3.4.2
-inflect==7.4.0
-textstat==0.7.4
+# ---- Speech to text [P1] ----
+# faster-whisper bundles audio decoding through PyAV, so no separate ffmpeg
+# binary is required. It also exposes per-segment avg_logprob / no_speech_prob,
+# which the Phase 2 transcription-confidence metric is built on.
+faster-whisper>=1.1.0
 
-# ---- Retrieval (Feature 4) ----
-sentence-transformers==3.3.1
+# ---- Understanding [P2] ----
+dateparser>=1.2.0
 
-# ---- OCR (Feature 7) ----
-pytesseract==0.3.13
-Pillow==11.0.0
+# ---- LLM abstraction [P2] ----
+# Only used as a fallback when rule-based extraction is low confidence.
+# The pipeline runs fully offline when no API key is configured.
+anthropic>=0.40.0
 
-# ---- Reminders (Feature 5) ----
-dateparser==1.2.0
-phonenumbers==8.13.52
+# ---- Optional: real microphone capture ----
+# Not required. DummyCaptureSource and every test run without it.
+# Install only if you want MicrophoneCaptureSource to work:
+#   pip install sounddevice soundfile
+# sounddevice>=0.5.0
+# soundfile>=0.12.1
 
-# ---- LLM providers (cluster summaries, classification, RAG answers) ----
-anthropic==0.42.0
+# ---- Dev / test ----
+pytest>=8.3.0
+httpx>=0.27.0
 
-# ---- Server-side TTS fallback ----
-pyttsx3==2.98
-
-# ---- Dev ----
-pytest==8.3.4
-pytest-asyncio==0.25.0
-httpx==0.28.1
-ruff==0.8.6
+# ---------------------------------------------------------------------------
+# Owned by other team members - uncomment when that work starts.
+# ---------------------------------------------------------------------------
+# chromadb>=0.5.0            # RAG vector store
+# sentence-transformers      # embeddings
+# nltk>=3.9                  # lemmatisation, collocations
+# gensim>=4.3                # word2vec
+# scikit-learn>=1.6          # LDA topic modelling
+# networkx>=3.4              # summarisation graph
+# pytesseract, Pillow        # OCR capture
+# pyttsx3                    # server-side TTS fallback

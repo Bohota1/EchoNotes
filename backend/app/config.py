@@ -1,8 +1,7 @@
 """Application settings.
 
-Every LNT tunable named in the paper is exposed here so an experiment can be reproduced by
-changing configuration rather than code. Defaults match the values reported in
-Saini et al. (2023) where the paper states one.
+Anything tunable lives here so behaviour can change through `.env` rather than
+through code edits. Settings are grouped by the pipeline stage they affect.
 """
 
 from functools import lru_cache
@@ -23,59 +22,68 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     # ---- Storage ----
-    database_url: str = "sqlite:///./data/echonotes.db"
-    chroma_dir: Path = BASE_DIR / "data" / "chroma"
+    database_url: str = f"sqlite:///{(BASE_DIR / 'data' / 'echonotes.db').as_posix()}"
     audio_raw_dir: Path = BASE_DIR / "data" / "audio_raw"
-    audio_processed_dir: Path = BASE_DIR / "data" / "audio_processed"
     transcript_dir: Path = BASE_DIR / "data" / "transcripts"
-    image_dir: Path = BASE_DIR / "data" / "images"
 
-    # ---- LNT Section 3.3: audio normalization + silence chunking ----
-    audio_target_dbfs: float = -20.0
-    silence_thresh_dbfs: int = -40
-    min_silence_len_ms: int = 500
-    chunk_keep_silence_ms: int = 250
+    # ---- Capture (Phase 1) ----
+    # Which AudioCaptureSource the /trigger endpoint uses.
+    #   dummy      - replays a fixture file, needs no hardware (default)
+    #   microphone - records from the host microphone, needs `sounddevice`
+    #   upload     - audio supplied by the caller
+    capture_source: str = "dummy"
+    dummy_audio_path: Path = BASE_DIR / "data" / "fixtures" / "sample_capture.wav"
+    max_capture_seconds: int = 300
 
-    # ---- LNT Section 3.2: ASR + translation to English ----
-    asr_backend: str = "google"
-    asr_default_language: str = "en-US"
-    translate_to: str = "en"
+    # ---- Speech to text (Phase 1) ----
+    asr_backend: str = "faster_whisper"
+    whisper_model: str = "base"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_language: str | None = None  # None -> auto-detect
+    whisper_beam_size: int = 5
+    whisper_vad_filter: bool = True
 
-    # ---- LNT Section 3.4: NLP ----
-    word2vec_algorithm: str = "cbow"  # cbow | skipgram, paper Section 3.4.3
-    word2vec_vector_size: int = 100
-    word2vec_window: int = 5
-    word2vec_min_count: int = 1
-    summary_top_k: int = 10  # first K ranked sentences, paper Section 3.4.5
-    lda_num_topics: int = 9  # paper's sample lecture produced 9 themes
-    lda_max_iter: int = 20
-
-    # ---- LLM ----
-    llm_provider: str = "anthropic"
-    llm_model: str = "claude-sonnet-5"
+    # ---- LLM abstraction (Phase 2) ----
+    # The pipeline works with no key at all: rules run first and the LLM is
+    # consulted only when a rule result is below its confidence floor.
+    llm_provider: str = "anthropic"  # anthropic | null
+    llm_model: str = "claude-opus-5"
+    llm_max_tokens: int = 1024
+    llm_timeout_seconds: float = 30.0
     anthropic_api_key: str = ""
-    openai_api_key: str = ""
 
-    # ---- Retrieval ----
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # ---- Understanding (Phase 2) ----
+    # Below these confidences the rule result is treated as unreliable and the
+    # LLM fallback is asked instead.
+    classification_confidence_floor: float = 0.55
+    extraction_confidence_floor: float = 0.50
+    key_phrase_limit: int = 10
 
-    # ---- Clustering weights, Idea11y Section 4.1 adapted ----
-    cluster_eps: float = 0.45
-    cluster_min_samples: int = 2
-    cluster_weight_note_type: float = 0.3
-    cluster_weight_subject: float = 0.6
-
-    # ---- OCR ----
-    ocr_engine: str = "tesseract"
-    tesseract_cmd: str = ""
-
-    # ---- Accessibility ----
-    capture_trigger: str = "spacebar"
-    tts_engine: str = "web_speech"
+    # ---- Quality scoring (Phase 2) ----
+    # Composite weights. Must sum to 1.0; validated at import by `weights_ok`.
+    quality_weight_readability: float = 0.30
+    quality_weight_coherence: float = 0.30
+    quality_weight_transcription: float = 0.40
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def llm_configured(self) -> bool:
+        """True when a real LLM provider can actually be reached."""
+        if self.llm_provider == "anthropic":
+            return bool(self.anthropic_api_key)
+        return False
+
+    def weights_ok(self) -> bool:
+        total = (
+            self.quality_weight_readability
+            + self.quality_weight_coherence
+            + self.quality_weight_transcription
+        )
+        return abs(total - 1.0) < 1e-6
 
 
 @lru_cache
