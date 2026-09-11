@@ -26,6 +26,9 @@ def transcription_out(note: Note) -> TranscriptionOut:
         confidence=logprob_to_confidence(note.asr_avg_logprob),
         no_speech_probability=note.asr_no_speech_prob,
         segment_count=note.asr_segment_count,
+        source_language=note.source_language,
+        translated=bool(note.translated),
+        chunk_count=note.chunk_count,
     )
 
 

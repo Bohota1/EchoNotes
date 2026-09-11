@@ -41,6 +41,15 @@ class TranscriptionOut(BaseModel):
     confidence: float = Field(description="0-1, derived from mean token log probability")
     no_speech_probability: float | None = None
     segment_count: int | None = None
+    source_language: str | None = Field(
+        default=None, description="Language actually spoken, before translation"
+    )
+    translated: bool = Field(
+        default=False, description="True when the text was translated into English"
+    )
+    chunk_count: int | None = Field(
+        default=None, description="Silence-split chunks the recording produced"
+    )
 
 
 class CaptureResponse(BaseModel):
@@ -79,3 +88,16 @@ class NoteSummary(BaseModel):
     note_type: str | None = None
     quality_score: float | None = None
     created_at: datetime
+
+
+class RecordingState(BaseModel):
+    """Whether a live recording is running, and for how long."""
+
+    recording: bool
+    capture_id: str | None = None
+    elapsed_seconds: float = 0.0
+    max_seconds: int = 0
+    hit_limit: bool = Field(
+        default=False, description="True once the recording reached the length cap"
+    )
+    spoken: str = Field(default="", description="Sentence to announce")
