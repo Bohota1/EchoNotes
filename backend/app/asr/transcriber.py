@@ -252,6 +252,81 @@ class LNTTranscriber(Transcriber):
     def _load_model(self):
         return self.base._load_model()
 
+    @staticmethod
+    def _prompt_for_chunk(previous_pieces: list[str]) -> str | None:
+        """The vocabulary hint and recent context to prime one chunk with.
+
+        Two separate jobs, both done through Whisper's `initial_prompt`:
+
+        * **Vocabulary.** Whisper strongly prefers words it has been primed
+          with. Without it, domain terms lose to common soundalikes - "deque"
+          becomes "DQ", "linked list" becomes "lengthless".
+        * **Context.** Chunking hands Whisper fragments with nothing around
+          them, so a chunk containing only "like" is transcribed as the
+          sentence "Like." Feeding the tail of what came before restores the
+          continuity the split removed.
+
+        Only the last couple of pieces are carried: the prompt is capped by the
+        model, and a long one starts steering the transcript rather than just
+        its vocabulary.
+        """
+        settings = get_settings()
+        parts: list[str] = []
+
+        if settings.whisper_initial_prompt:
+            parts.append(settings.whisper_initial_prompt.strip())
+
+        if settings.whisper_carry_context and previous_pieces:
+            parts.append(" ".join(previous_pieces[-2:]).strip())
+
+        prompt = " ".join(p for p in parts if p).strip()
+        # Whisper counts the prompt against its context; keep it bounded.
+        return prompt[-800:] if prompt else None
+
+    def _transcribe_whole(
+        self, model, audio_path: Path, normalized: Path, detected: str | None, task: str
+    ) -> TranscriptionResult:
+        """One pass over the whole recording, no chunking.
+
+        Used when `WHISPER_CHUNK_AUDIO=false`. More accurate than the chunked
+        path because nothing interrupts Whisper's context window, but it does
+        not follow the paper's Section 3.3.
+        """
+        settings = get_settings()
+        segments, info = model.transcribe(
+            str(normalized),
+            language=detected if task == "transcribe" else None,
+            task=task,
+            beam_size=settings.whisper_beam_size,
+            vad_filter=settings.whisper_vad_filter,
+            initial_prompt=self._prompt_for_chunk([]),
+        )
+        segments = list(segments)
+        text = " ".join(s.text.strip() for s in segments if s.text.strip())
+
+        collected = [
+            TranscriptSegment(
+                start=s.start,
+                end=s.end,
+                text=s.text.strip(),
+                avg_logprob=getattr(s, "avg_logprob", None),
+                no_speech_prob=getattr(s, "no_speech_prob", None),
+            )
+            for s in segments
+            if s.text.strip()
+        ]
+        logger.info("LNT pipeline: whole-file pass -> %d words", len(text.split()))
+
+        return TranscriptionResult(
+            text=_ensure_terminal_period(text),
+            language="en" if task == "translate" else detected,
+            language_probability=getattr(info, "language_probability", None),
+            duration_seconds=getattr(info, "duration", None),
+            model=f"{self.name}:{self.base.model_size}",
+            segments=collected,
+            source_language=detected,
+        )
+
     def transcribe(self, audio_path: Path, language: str | None = None) -> TranscriptionResult:
         from app.audio.chunking import split_on_silence_to_files
         from app.audio.normalization import normalize
@@ -273,9 +348,27 @@ class LNTTranscriber(Transcriber):
             normalized = audio_path
 
         # --- 2. detect the language (Section 3.2) --------------------------
+        # A configured language wins over detection, matching WhisperTranscriber
+        # above. Detection on a short clip is unreliable - a few seconds of
+        # accented English can come back as Hindi at 0.37 confidence - and a
+        # wrong guess is not a small error: it flips `task` to "translate"
+        # below, so the note is silently rewritten instead of transcribed.
+        language = language or settings.whisper_language
+
         detected, probability = (language, None)
         if language is None:
             detected, probability = detect_language(model, normalized)
+            if probability is not None and probability < settings.language_detection_floor:
+                # Too uncertain to act on. Transcribing in the detected language
+                # risks nonsense; assuming English at least keeps the user's own
+                # words when they were speaking it, which is the common case.
+                logger.warning(
+                    "language detected as %r but only %.2f confident; "
+                    "transcribing as-is rather than translating",
+                    detected,
+                    probability,
+                )
+                detected = None
 
         # The paper standardises everything to English before analysis. Whisper
         # does that itself, so no external translation service is involved.
@@ -289,6 +382,14 @@ class LNTTranscriber(Transcriber):
             logger.info("source language %r; translating to English", detected)
 
         # --- 3. split on silence (Section 3.3) -----------------------------
+        if not settings.whisper_chunk_audio:
+            # Whisper reads a 30-second context window and uses the words around
+            # a sound to decide what it was. Splitting at every pause takes that
+            # away, so one pass over the whole recording is more accurate - at
+            # the cost of departing from the paper's Section 3.3.
+            logger.info("chunking disabled; recognising the whole recording in one pass")
+            return self._transcribe_whole(model, audio_path, normalized, detected, task)
+
         try:
             chunk_paths = split_on_silence_to_files(normalized)
         except Exception as exc:  # noqa: BLE001
@@ -308,6 +409,7 @@ class LNTTranscriber(Transcriber):
                     task=task,
                     beam_size=settings.whisper_beam_size,
                     vad_filter=False,  # chunking already removed the silence
+                    initial_prompt=self._prompt_for_chunk(pieces),
                 )
                 chunk_segments = list(chunk_segments)
             except Exception as exc:  # noqa: BLE001
