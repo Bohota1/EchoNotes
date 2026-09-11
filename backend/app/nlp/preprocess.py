@@ -58,6 +58,28 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _WORD_RE = re.compile(r"[A-Za-z0-9']+")
 _PUNCT_RE = re.compile(r"[^\w\s]")
 
+# --- LNT §3.3: multi-period abbreviations ----------------------------------
+# Two or more single letters each followed by a period: "U.S.A.", "i.e.", "e.g."
+# A lone "Dr." is deliberately not matched - see `collapse_abbreviations`.
+_MULTI_PERIOD_ABBREV_RE = re.compile(r"\b(?:[A-Za-z]\.){2,}")
+
+# --- LNT §3.3: plural -> singular -------------------------------------------
+#: Words ending in "s" that are not plurals. Stripping the "s" from these
+#: invents a word that was never spoken, which is worse for the frequency
+#: dictionary than leaving a plural intact.
+_NOT_PLURAL = frozenset(
+    """
+    is was has does goes gas bus plus this thus yes news analysis basis crisis
+    thesis hypothesis series species access process address class glass pass
+    less unless across always perhaps its his hers ours yours theirs status
+    focus campus virus bonus census physics mathematics statistics economics
+    politics ethics graphics logistics lens whereas
+    """.split()
+)
+
+#: Endings where the plural marker is "es" rather than "s".
+_ES_ENDINGS = ("ses", "xes", "zes", "ches", "shes")
+
 
 def normalize_unicode(text: str) -> str:
     """NFKC-normalise and fold smart quotes, dashes and exotic spaces to ASCII."""
@@ -152,8 +174,82 @@ def clean_transcript(text: str) -> str:
     return normalize_whitespace(text)
 
 
+def collapse_abbreviations(text: str) -> str:
+    """LNT §3.3: *"removing periods in multi-period abbreviations"*.
+
+    "U.S.A." becomes "USA", "i.e." becomes "ie". Without this the generic
+    punctuation strip turns a single abbreviation into a run of single letters
+    ("u s a"), which then pollutes the word-frequency dictionary of §3.4.4 with
+    tokens that mean nothing and inflates the sentence length used for
+    readability in §3.5.
+
+    Only sequences of *two or more* single letters each followed by a period are
+    collapsed, which is what "multi-period" means. A single trailing period -
+    "Dr." or the end of a sentence - is left for the punctuation step, so
+    sentence boundaries survive to be used by §3.4.5.
+    """
+    return _MULTI_PERIOD_ABBREV_RE.sub(lambda m: m.group(0).replace(".", ""), text)
+
+
+def singularize(word: str) -> str:
+    """LNT §3.3: *"converting plural words to singular words"*.
+
+    A conservative rule-based singulariser. The paper names the step but not an
+    implementation; this follows the ordinary English patterns and declines to
+    guess anywhere they do not clearly apply, because over-stemming ("bus" ->
+    "bu", "analysis" -> "analysi") corrupts the word-frequency dictionary that
+    §3.4.4, §3.4.5 and §3.4.6 are all built on. A missed plural costs one split
+    entry; a wrong singular invents a word that was never spoken.
+
+    Case-insensitive on the decision, and preserves nothing: callers here are
+    producing lower-cased analysis text.
+    """
+    lowered = word.lower()
+    if len(lowered) <= 3 or lowered in _NOT_PLURAL or not lowered.endswith("s"):
+        return word
+
+    # "policies" -> "policy"; "series" is caught by _NOT_PLURAL above.
+    if lowered.endswith("ies") and len(lowered) > 4:
+        return word[:-3] + "y"
+
+    # "classes" -> "class", "boxes" -> "box", "batches" -> "batch".
+    for ending in _ES_ENDINGS:
+        if lowered.endswith(ending) and len(lowered) > len(ending) + 1:
+            return word[:-2]
+
+    # "students" -> "student". Never strip from "-ss" ("class", "process").
+    if not lowered.endswith("ss"):
+        return word[:-1]
+
+    return word
+
+
+def singularize_text(text: str) -> str:
+    """Apply `singularize` across every whitespace-delimited token."""
+    return " ".join(singularize(token) for token in text.split())
+
+
 def to_analysis_text(text: str) -> str:
-    """Lower-cased, punctuation-free form used for word statistics and scoring."""
-    text = normalize_unicode(text).lower()
-    text = _PUNCT_RE.sub(" ", text)
+    """The LNT §3.3 analysis form, in the order the paper lists the steps.
+
+    The paper: *"we work on preprocessing of text by handling the text anomalies
+    like removing extra free spaces, removing periods in multi-period
+    abbreviations, removing punctuations, converting plural words to singular
+    words, and converting text to lower case"*.
+
+    All five, in that order. Lower-casing is applied before singularisation
+    rather than strictly last, which produces identical output - the result is
+    lower-case either way - and lets the singulariser match its word lists
+    without casing them at every call.
+
+    This is the statistical form only. `clean_transcript` deliberately does none
+    of it: capitalisation is the only signal that finds people's names, and the
+    text read back to a user has to remain readable.
+    """
+    text = normalize_unicode(text)
+    text = _MULTI_SPACE_RE.sub(" ", text).strip()  # 1. extra free spaces
+    text = collapse_abbreviations(text)            # 2. multi-period abbreviations
+    text = _PUNCT_RE.sub(" ", text)                # 3. punctuation
+    text = text.lower()                            # 5. lower case
+    text = singularize_text(text)                  # 4. plural -> singular
     return _MULTI_SPACE_RE.sub(" ", text).strip()
