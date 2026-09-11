@@ -16,13 +16,13 @@ library or algorithm.
 
 | Paper section | What the paper specifies | Module |
 |---|---|---|
-| §3.1 Fig. 1 | Overall LNT layout: record → normalize → chunk → recognize → translate → analyze | `app/pipeline/loop.py` |
-| §3.2 | Audio collection; multilanguage input; conversion of every language to **English** as the single standard analysis language | `app/capture/recorder.py`, `app/asr/language.py`, `app/asr/translation.py` |
+| §3.1 Fig. 1 | Overall LNT layout: record → normalize → chunk → recognize → translate → analyze | `app/pipeline/capture_pipeline.py` (audio path) → `app/nlp/analysis.py` (analysis path) |
+| §3.2 | Audio collection; multilanguage input; conversion of every language to **English** as the single standard analysis language | `app/capture/sources.py`, `app/asr/transcriber.py` |
 | §3.3 | Pitch **normalization** with `pydub` (Fig. 2 raw → Fig. 3 normalized waveform); suppresses applause and outlier noise | `app/audio/normalization.py`, `app/audio/waveform.py` |
 | §3.3 | **Chunking on silence** using a threshold in dBFS and a minimum silence duration in ms; a `.` is appended at the end of each recognized chunk | `app/audio/chunking.py` |
-| §3.3 | Speech→text per chunk via the `SpeechRecognition` library + Google API, language specified, detected text appended to the file | `app/asr/recognizer.py` |
-| §3.3 | Translation to English with `googletrans` when the source is not English | `app/asr/translation.py` |
-| §3.3 | Text cleaning: strip extra whitespace, remove periods inside multi-period abbreviations, remove punctuation, plural→singular, lowercase | `app/nlp/preprocess.py` |
+| §3.3 | Speech→text per chunk, detected text appended with a `.` | `app/asr/transcriber.py` — **deviation:** faster-whisper replaces `SpeechRecognition` + Google API. Offline, and its per-segment `avg_logprob` is what the transcription-confidence metric is built on |
+| §3.3 | Standardise every language to English before analysis | `app/asr/transcriber.py` — **deviation:** Whisper's own `translate` task rather than `googletrans`; one pass instead of transcribe-then-translate. `app/asr/translation.py` documents the difference and is not on the runtime path |
+| §3.3 | Text cleaning, all five steps in the paper's order: strip extra whitespace → remove periods in multi-period abbreviations → remove punctuation → plural→singular → lowercase | `app/nlp/preprocess.py::to_analysis_text`, with `collapse_abbreviations` and `singularize`. `clean_transcript` deliberately applies none of it: capitalisation is the only signal that finds people |
 | §3.4.1 | **White-space tokenization** with space as delimiter; word / frequency / length dictionary; stop-word and noise-word removal | `app/nlp/tokenization.py` |
 | §3.4.2 | **Lemmatization** with the NLTK `WordNetLemmatizer` (Morphy) — not stemming | `app/nlp/lemmatization.py` |
 | §3.4.3 | **Word2Vec**, both **CBOW** and **continuous skip-gram** (Fig. 4), softmax output | `app/nlp/embeddings_w2v.py` |
@@ -33,8 +33,8 @@ library or algorithm.
 | §3.5 Table 2 | Quality metrics: **Flesch reading ease**, **Cohesion**, **Coherence**, **Entropy** | `app/quality/metrics.py` |
 | §3.5 Eq. 4 | **Min–max normalization** of every metric onto 0–1, equal weight per metric | `app/quality/scaling.py` |
 | §3.5 Eq. 5 | `Quality Score (Qi) = Flesch_reading_ease + Cohesion + Coherence + Entropy`, normalized to 0–1. Higher Qi = more readable, more thematic integrity, less chaos | `app/quality/score.py` |
-| §4.1 | Runtime order of operations for a whole lecture | `app/pipeline/loop.py` |
-| §4.2, Tables 3–4 | Validation harness: ASR accuracy (~92% reported) and quality metrics against manual notes | `tests/test_quality_validation.py` |
+| §4.1 | Runtime order of operations for a whole lecture | `app/nlp/analysis.py::analyze` runs §3.4.4 → §3.4.5 → §3.4.6 → §3.4.7 → §3.5 in the paper's order |
+| §4.2, Tables 3–4 | Validation: Qi reproduced from the paper's own Table 6 values (0.7243 against the reported 0.727) | `tests/test_lnt_quality.py`, `tests/test_lnt_nlp.py`, `tests/test_lnt_audio.py` |
 
 **Reference values from the paper, used as regression targets in tests.** On the sample 30-minute
 lecture: 1947 words, 9 themes, ~55 topics, a 284-word summary, one theme per ~217 words, one topic
