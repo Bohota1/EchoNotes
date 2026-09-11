@@ -22,6 +22,7 @@ from app.api.v1 import (
     capture,
     contacts,
     hierarchy,
+    lnt,
     notes,
     reminders,
     retrieval,
@@ -42,3 +43,4 @@ api_router.include_router(retrieval.router, prefix="/retrieval", tags=["retrieva
 api_router.include_router(reminders.router, prefix="/reminders", tags=["reminders"])
 api_router.include_router(contacts.router, prefix="/contacts", tags=["contacts"])
 api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
+api_router.include_router(lnt.router, prefix="/lnt", tags=["lnt-analysis"])
