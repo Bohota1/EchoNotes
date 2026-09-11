@@ -92,3 +92,462 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Application layout.
+ * -------------------------------------------------------------------------*/
+
+.app-header {
+  padding: 1.5rem 1rem 0.5rem;
+  max-width: 70rem;
+  margin: 0 auto;
+}
+.app-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+main {
+  max-width: 70rem;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.15rem 1.25rem;
+  background: var(--bg);
+}
+.panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+.panel h3 {
+  font-size: 1rem;
+  margin: 1rem 0 0.4rem;
+}
+.panel h4 {
+  font-size: 0.9rem;
+  margin: 0.6rem 0 0.25rem;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+
+/* --- text ---------------------------------------------------------------- */
+
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.85rem;
+}
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 0.75rem;
+}
+.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+.warning {
+  color: var(--danger);
+}
+.transcript {
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+kbd {
+  font: inherit;
+  font-size: 0.85em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.05em 0.4em;
+}
+code {
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+/* --- controls ------------------------------------------------------------ */
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 0.45rem 0.8rem;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+button.big {
+  font-size: 1.1rem;
+  padding: 0.8rem 1.6rem;
+}
+button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+button.small-button {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+}
+button.chip {
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+}
+
+input[type="text"] {
+  font: inherit;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* --- capture ------------------------------------------------------------- */
+
+.capture-result {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 0.75rem 0 0;
+}
+.meta div {
+  display: flex;
+  flex-direction: column;
+}
+.meta dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.meta dd {
+  margin: 0.1rem 0 0;
+  font-weight: 600;
+}
+
+/* --- understanding ------------------------------------------------------- */
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0.25rem;
+}
+.badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+/* Note type is always spelled out in words - never colour alone. */
+.badge-todo {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.badge-academic {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.badge-brainstorm {
+  border-color: var(--muted);
+}
+.badge-quiet {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.entity-group ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.entity-group li {
+  margin: 0.1rem 0;
+}
+
+.quality {
+  margin-top: 0.9rem;
+}
+.quality summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.quality table {
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+.quality th,
+.quality td {
+  text-align: left;
+  padding: 0.2rem 1.5rem 0.2rem 0;
+  font-weight: 400;
+}
+.quality th {
+  color: var(--muted);
+}
+
+/* --- ask ----------------------------------------------------------------- */
+
+.ask-form label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+.ask-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+.answer {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+.answer-text {
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+/* --- notes and reminders ------------------------------------------------- */
+
+.note-list,
+.reminder-list,
+.status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.status-list li {
+  padding: 0.15rem 0;
+}
+
+.note-row {
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0;
+}
+.note-row:first-child {
+  border-top: none;
+}
+.note-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.note-toggle {
+  flex: 1;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.35rem;
+}
+.note-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.note-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+.note-detail {
+  padding: 0 0.35rem 0.5rem;
+}
+
+.reminder-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0;
+}
+.reminder-row:first-child {
+  border-top: none;
+}
+.reminder-title {
+  margin: 0;
+  font-weight: 600;
+}
+.reminder-list p {
+  margin: 0.1rem 0;
+}
+
+/* --- capture controls, notices, checkboxes ------------------------------- */
+
+.capture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.field label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+select {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.notice {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.92rem;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.checkbox input {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.capture-result .small-button,
+.note-detail .small-button,
+.answer .small-button {
+  margin-top: 0.4rem;
+}
+
+/* --- hierarchy ----------------------------------------------------------- */
+
+.subject {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.subject h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+}
+.topic {
+  margin: 0.35rem 0 0.6rem 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+}
+.topic h4 {
+  margin: 0;
+}
+.topic-toggle {
+  border: none;
+  background: none;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  color: var(--fg);
+}
+.topic-summary {
+  margin: 0.1rem 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.topic-notes {
+  margin: 0.3rem 0;
+  padding-left: 1.2rem;
+}
+.topic-notes li {
+  margin: 0.25rem 0;
+}
+.topic-notes .badge {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+}
+
+/* --- live recording ------------------------------------------------------ */
+
+.record-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.recording-indicator {
+  margin: 0.5rem 0 0;
+  font-weight: 700;
+  color: var(--recording);
+}
+
+/* The dot pulses, but the word "Recording" and the running timer carry the
+   state on their own - never colour or motion alone. */
+@media (prefers-reduced-motion: no-preference) {
+  .recording-indicator {
+    animation: recording-pulse 1.6s ease-in-out infinite;
+  }
+}
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
