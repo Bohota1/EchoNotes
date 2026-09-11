@@ -7,6 +7,8 @@ persistence and serialisation are all exercised for real.
 
 from __future__ import annotations
 
+import pytest
+
 
 class TestHealth:
     def test_reports_capture_and_llm_status(self, client):
@@ -117,7 +119,12 @@ class TestUnderstandEndpoint:
     def test_empty_text_is_rejected(self, client):
         assert client.post("/api/v1/understand", json={"text": ""}).status_code == 422
 
-    def test_quality_reflects_supplied_confidence(self, client, sample_text):
+    def test_supplied_confidence_is_reported_but_does_not_move_qi(
+        self, client, sample_text
+    ):
+        # Equation 5 of the paper has exactly four terms - readability,
+        # cohesion, coherence, entropy - and ASR confidence is not one of them.
+        # It is reported alongside Qi, never folded into it.
         low = client.post(
             "/api/v1/understand",
             json={"text": sample_text, "transcription_confidence": 0.1},
@@ -126,7 +133,9 @@ class TestUnderstandEndpoint:
             "/api/v1/understand",
             json={"text": sample_text, "transcription_confidence": 1.0},
         ).json()
-        assert low["quality"]["quality_score"] < high["quality"]["quality_score"]
+
+        assert low["quality"]["quality_score"] == high["quality"]["quality_score"]
+        assert low["quality"]["transcription_confidence"] == pytest.approx(0.1)
 
 
 class TestNotes:

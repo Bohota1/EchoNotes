@@ -139,7 +139,17 @@ def test_organize_creates_new_topic_when_nothing_matches(db_session):
     note = _make_note(db_session, "A completely unrelated note about baking sourdough bread.")
     assignment = organize(db_session, note)
 
-    assert assignment.method in ("heuristic", "llm", "lnt-theme", "lnt-lda")
+    # Any of the naming sources is fine; what matters is that a new topic was
+    # created rather than the note being forced into an unrelated one.
+    # "key-phrase" names the topic from Phase 2's extracted phrases, which is
+    # what runs when there is no LLM key and no LNT theme/LDA output.
+    assert assignment.method in (
+        "heuristic",
+        "key-phrase",
+        "llm",
+        "lnt-theme",
+        "lnt-lda",
+    )
     assert assignment.created_new_topic is True
     topic = TopicRepository(db_session).get(assignment.topic_id)
     assert topic is not None
