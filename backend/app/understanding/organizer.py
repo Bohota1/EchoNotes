@@ -71,7 +71,8 @@ class TopicAssignment:
     created_new_subject: bool
     created_new_topic: bool
     confidence: float
-    method: str  # "explicit" | "embedding" | "llm-match" | "lnt-theme" | "lnt-lda" | "llm" | "heuristic" | "unfiled"
+    method: str  # "explicit" | "embedding" | "llm-match" | "lnt-theme"
+    # | "lnt-lda" | "key-phrase" | "llm" | "heuristic" | "unfiled"
     reason: str
 
 
@@ -157,10 +158,82 @@ def match_via_llm(text: str, candidates: list[dict[str, Any]]) -> dict[str, Any]
     return {**candidates[choice - 1], "score": 0.85}
 
 
+# Words that make a phrase read as an event rather than a subject. "Processes
+# hold resources" describes something happening; "operating systems" names the
+# thing the note is about, and only the second works as a heading.
+_ACTION_WORDS = frozenset(
+    """
+    is are was were be been being has have had do does did
+    covered covers hold holds held happen happens happened wait waits
+    controls control controlled uses use used make makes made get gets
+    go goes went come comes said says need needs want wants take takes
+    give gives show shows call calls put puts run runs
+    """.split()
+)
+
+# Trailing words that describe the container, not the subject: "machine
+# learning lecture" is a lecture about machine learning, and the topic is
+# "Machine Learning".
+_GENERIC_TAIL = frozenset(
+    """
+    lecture lectures notes note class classes session sessions
+    chapter chapters today tomorrow yesterday meeting
+    """.split()
+)
+
+
+def _score_phrase(phrase: str, confidence: float) -> float:
+    """How well a key phrase would work as a topic heading."""
+    words = phrase.lower().split()
+    score = confidence
+    if any(word in _ACTION_WORDS for word in words):
+        score -= 0.15
+    if len(words) == 2:
+        score += 0.05
+    return score
+
+
+def _tidy_topic_name(phrase: str) -> str:
+    """Trim container words off the end and title-case what is left."""
+    words = phrase.strip().split()
+    while len(words) > 1 and words[-1].lower() in _GENERIC_TAIL:
+        words.pop()
+    return " ".join(words).title()
+
+
+def name_from_key_phrases(key_phrases: list[dict[str, Any]]) -> str | None:
+    """Pick the best key phrase to name a topic after.
+
+    Phase 2 already extracts these (`app.understanding.entities`), and they are
+    far better headings than the first few words of the note - "Operating
+    Systems" instead of "Today We Covered Deadlock". Highest confidence alone is
+    not enough, so phrases that read as events are penalised and ties go to
+    whichever appeared earliest in the note.
+    """
+    best: tuple[float, int, str] | None = None
+    for phrase in key_phrases:
+        value = (phrase.get("value") or "").strip()
+        if not value or len(value.split()) > 4:
+            continue
+        score = _score_phrase(value, float(phrase.get("confidence") or 0.0))
+        # Earlier in the note breaks ties: a note usually names its subject
+        # before it elaborates on it.
+        position = phrase.get("span_start")
+        position = position if isinstance(position, int) else 10**6
+        candidate = (score, -position, value)
+        if best is None or candidate > best:
+            best = candidate
+
+    if best is None:
+        return None
+    return _tidy_topic_name(best[2]) or None
+
+
 def propose_new_topic(
     text: str,
     themes: list[dict[str, Any]] | None = None,
     lda_topics: list[dict[str, Any]] | None = None,
+    key_phrases: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     """Name a new topic for a note with nowhere to go. Returns `(name, method)`.
 
@@ -181,6 +254,12 @@ def propose_new_topic(
         label = lda.get("label") if isinstance(lda, dict) else None
         if label:
             return str(label), "lnt-lda"
+
+    # Phase 2's key phrases are always present and need no model, so they are
+    # tried before the LLM and long before the first-few-words fallback.
+    from_phrases = name_from_key_phrases(key_phrases or [])
+    if from_phrases:
+        return from_phrases, "key-phrase"
 
     client = get_llm_client()
     if client.available:
@@ -211,7 +290,12 @@ def organize(db, note) -> TopicAssignment:
     `docs/hierarchy-handoff.md`). `note` is an `app.db.models.Note` row that
     has already been flushed (has an id).
     """
-    from app.db.repositories import NoteRepository, SubjectRepository, TopicRepository
+    from app.db.repositories import (
+        EntityRepository,
+        NoteRepository,
+        SubjectRepository,
+        TopicRepository,
+    )
 
     settings = get_settings()
     subject_repo = SubjectRepository(db)
@@ -316,8 +400,38 @@ def organize(db, note) -> TopicAssignment:
         return assignment
 
     # --- 3. propose a new topic ---------------------------------------------
+    # `note` is a Note row, so it never carries `themes` / `lda_topics` - those
+    # arrive only when a caller passes them explicitly. The key phrases, though,
+    # were written to note_entities by the understanding stage, which runs
+    # before this one.
+    key_phrases = [
+        {
+            "value": entity.value,
+            "confidence": entity.confidence,
+            "span_start": entity.span_start,
+        }
+        for entity in EntityRepository(db).list_for_note(note.id, kind="key_phrase")
+    ]
+    if not key_phrases:
+        # A note captured before the understanding stage existed (or with it
+        # switched off) has no stored phrases. Extracting them here costs a few
+        # milliseconds and is far better than naming the topic after the note's
+        # first four words.
+        from app.understanding.entities import extract_key_phrases
+
+        key_phrases = [
+            {
+                "value": phrase.value,
+                "confidence": phrase.confidence,
+                "span_start": phrase.span_start,
+            }
+            for phrase in extract_key_phrases(text)
+        ]
     topic_name, name_method = propose_new_topic(
-        text, getattr(note, "themes", None), getattr(note, "lda_topics", None)
+        text,
+        getattr(note, "themes", None),
+        getattr(note, "lda_topics", None),
+        key_phrases,
     )
 
     subject_candidates = [
@@ -342,7 +456,11 @@ def organize(db, note) -> TopicAssignment:
     topic, created_topic = topic_repo.get_or_create(subject.id, topic_name)
 
     confidence = {
-        "lnt-theme": 0.55, "lnt-lda": 0.55, "llm": 0.4, "heuristic": 0.3
+        "lnt-theme": 0.55,
+        "lnt-lda": 0.55,
+        "key-phrase": 0.5,
+        "llm": 0.4,
+        "heuristic": 0.3,
     }.get(name_method, 0.3)
 
     reason = f"no existing topic cleared the {settings.topic_similarity_threshold:.2f} similarity bar; named via {name_method}"
