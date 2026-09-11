@@ -33,7 +33,27 @@ class Settings(BaseSettings):
     #   upload     - audio supplied by the caller
     capture_source: str = "dummy"
     dummy_audio_path: Path = BASE_DIR / "data" / "fixtures" / "sample_capture.wav"
+    # How long a live recording runs when the caller does not say. This is the
+    # actual recording length, not a ceiling - `max_capture_seconds` below is
+    # the ceiling. They were the same setting once, which meant every
+    # microphone capture blocked for five minutes.
+    default_capture_seconds: int = 15
     max_capture_seconds: int = 300
+
+    # ---- LNT audio pipeline (paper Section 3.3) ----
+    # Loudness every recording is normalised to before chunking.
+    audio_target_dbfs: float = -20.0
+    audio_processed_dir: Path = BASE_DIR / "data" / "audio_processed"
+    # Silence threshold. The offset is taken relative to the recording's own
+    # loudness, which is what makes one setting work across recording levels;
+    # `silence_thresh_dbfs` is the absolute fallback.
+    silence_thresh_offset_db: float = -16.0
+    silence_thresh_dbfs: int = -40
+    min_silence_len_ms: int = 400
+    chunk_keep_silence_ms: int = 200
+    # Chunks outside this range are split or dropped.
+    min_chunk_ms: int = 250
+    max_chunk_ms: int = 30_000
 
     # ---- Speech to text (Phase 1) ----
     asr_backend: str = "faster_whisper"
@@ -43,6 +63,34 @@ class Settings(BaseSettings):
     whisper_language: str | None = None  # None -> auto-detect
     whisper_beam_size: int = 5
     whisper_vad_filter: bool = True
+    # Which transcription pipeline to run:
+    #   lnt    - the paper's Section 3.3 route: normalise -> split on silence ->
+    #            recognise each chunk -> append "." -> join
+    #   direct - hand the whole file to Whisper in one go
+    asr_pipeline: str = "lnt"
+    # The paper standardises every language to English before analysis
+    # (Section 3.2). Whisper does this itself with its translate task, so no
+    # external translation service is involved.
+    translate_to_english: bool = True
+
+    # ---- LNT NLP tasks (paper Section 3.4) ----
+    # 3.4.3 Word2Vec: "cbow" or "skipgram" (the paper implements both)
+    word2vec_algorithm: str = "cbow"
+    word2vec_vector_size: int = 100
+    word2vec_window: int = 5
+    word2vec_min_count: int = 1
+    word2vec_epochs: int = 30
+    # 3.4.5 Summarization: the paper prints "the first K sentences of ranking".
+    summary_top_k: int = 5
+    # Fraction of sentences to keep when K is not given explicitly.
+    summary_ratio: float = 0.35
+    # 3.4.6 Thematic analysis: hapaxes, collocations, bigrams
+    thematic_top_n: int = 20
+    collocation_window: int = 2
+    # 3.4.7 Topic modelling with LDA
+    lda_num_topics: int = 9
+    lda_max_iter: int = 20
+    lda_top_terms: int = 10
 
     # ---- LLM abstraction (Phase 2) ----
     # The pipeline works with no key at all: rules run first and the LLM is
