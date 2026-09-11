@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # microphone capture blocked for five minutes.
     default_capture_seconds: int = 15
     max_capture_seconds: int = 300
+    # Frames PortAudio hands the capture callback at a time. Larger blocks give
+    # the callback more headroom before input is dropped; 0 lets PortAudio
+    # choose, which on Windows can be small enough to drop audio under load.
+    capture_blocksize: int = 4096
 
     # ---- LNT audio pipeline (paper Section 3.3) ----
     # Loudness every recording is normalised to before chunking.
@@ -63,6 +67,31 @@ class Settings(BaseSettings):
     whisper_language: str | None = None  # None -> auto-detect
     whisper_beam_size: int = 5
     whisper_vad_filter: bool = True
+    # Below this confidence a detected language is treated as unknown rather
+    # than acted on. Detection on a few seconds of accented speech is noisy,
+    # and a wrong guess flips transcription into translation, which rewrites
+    # the note instead of recording it.
+    language_detection_floor: float = 0.60
+
+    # Vocabulary hint passed to Whisper. Whisper strongly prefers words it has
+    # been primed with, which is the fix for domain terms it otherwise mangles
+    # ("deque" -> "DQ", "linked list" -> "lengthless"). Keep it short: a long
+    # prompt starts to bias the transcript rather than just its vocabulary.
+    whisper_initial_prompt: str = ""
+
+    # Carry the tail of the previous chunk forward as context. The paper's
+    # Section 3.3 chunking splits on silence and recognises each chunk alone,
+    # which suited an API that had no cross-clip context anyway. Whisper does
+    # have context and depends on it, so a chunk containing only "like" is
+    # transcribed as the sentence "Like." Passing recent text forward restores
+    # what the split removed.
+    whisper_carry_context: bool = True
+
+    # Whether to chunk at all before recognising. True follows the paper.
+    # False sends the whole recording to Whisper in one pass, which is more
+    # accurate because nothing interrupts its context window - at the cost of
+    # departing from Section 3.3.
+    whisper_chunk_audio: bool = True
     # Which transcription pipeline to run:
     #   lnt    - the paper's Section 3.3 route: normalise -> split on silence ->
     #            recognise each chunk -> append "." -> join
