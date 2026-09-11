@@ -70,6 +70,9 @@ def persist_capture(
         asr_avg_logprob=transcription.avg_logprob if transcription else None,
         asr_no_speech_prob=transcription.no_speech_prob if transcription else None,
         asr_segment_count=len(transcription.segments) if transcription else None,
+        source_language=getattr(transcription, "source_language", None) if transcription else None,
+        translated=bool(getattr(transcription, "translated", False)) if transcription else False,
+        chunk_count=getattr(transcription, "chunk_count", None) if transcription else None,
     )
 
 
@@ -177,6 +180,7 @@ def run_understanding_on_text(
     result = understand(cleaned, transcription_confidence=transcription_confidence)
     if note is not None:
         _store_understanding(db, note, result)
+        _run_lnt_analysis(db, note, transcription_confidence)
         if cleaned:
             _organize_note(db, note)
             _index_and_derive(db, note)
@@ -197,6 +201,7 @@ def _run_understanding(db: Session, note: Note, transcription_confidence: float)
             note.cleaned_text, transcription_confidence=transcription_confidence
         )
         _store_understanding(db, note, result)
+        _run_lnt_analysis(db, note, transcription_confidence)
     except Exception:
         logger.exception("understanding failed for note %s; transcript kept", note.id)
 
@@ -235,6 +240,40 @@ def _index_and_derive(db: Session, note: Note) -> None:
     index_note_safe(db, note)
     create_reminders_safe(db, note)
     link_contacts_safe(db, note)
+
+
+def _run_lnt_analysis(db: Session, note: Note, transcription_confidence: float) -> None:
+    """Run and store the paper's Section 3.4-3.5 analysis.
+
+    Separate from `_run_understanding` so a failure in one cannot cost the
+    other, and so neither can cost the transcript that is already stored.
+    """
+    try:
+        from app.db.repositories import LntAnalysisRepository, UnderstandingRepository
+        from app.nlp.analysis import analyze
+
+        analysis = analyze(
+            note.cleaned_text, transcription_confidence=transcription_confidence
+        )
+        LntAnalysisRepository(db).upsert(note.id, analysis)
+
+        # Fold the four Table 2 metrics into the understanding row so a caller
+        # reading quality does not have to join two tables.
+        if analysis.quality is not None:
+            UnderstandingRepository(db).upsert(
+                note.id,
+                readability=analysis.quality.readability,
+                cohesion=analysis.quality.cohesion,
+                coherence=analysis.quality.coherence,
+                entropy=analysis.quality.entropy,
+                quality_score=analysis.quality.quality_score,
+                transcription_confidence=analysis.quality.transcription_confidence,
+                word_count=analysis.quality.word_count,
+                sentence_count=analysis.quality.sentence_count,
+            )
+        db.refresh(note)
+    except Exception:
+        logger.exception("LNT analysis failed for note %s; transcript kept", note.id)
 
 
 def _store_understanding(db: Session, note: Note, result) -> None:
