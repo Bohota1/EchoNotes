@@ -45,6 +45,13 @@ class TranscriptionResult:
     model: str = ""
     segments: list[TranscriptSegment] = field(default_factory=list)
 
+    #: What the speaker actually spoke, before any translation (Section 3.2).
+    source_language: str | None = None
+    #: True when the text was translated into English rather than transcribed.
+    translated: bool = False
+    #: How many silence-split chunks the recording produced (Section 3.3).
+    chunk_count: int | None = None
+
     @property
     def avg_logprob(self) -> float | None:
         """Duration-weighted mean log probability across segments.
@@ -177,14 +184,205 @@ def logprob_to_confidence(avg_logprob: float | None) -> float:
     return max(0.0, min(1.0, math.exp(avg_logprob)))
 
 
+# ---------------------------------------------------------------------------
+# The LNT pipeline (paper Section 3.3)
+#
+#   normalise -> split on silence -> recognise each chunk -> append "." -> join
+#
+# The alternative is handing the whole file to Whisper at once, which is what
+# `asr_pipeline = "direct"` does. Running the paper's route buys three things
+# the single-shot call does not give:
+#
+#   * a known loudness before any threshold is applied, so one silence setting
+#     works across recording levels;
+#   * sentence boundaries taken from where the speaker actually paused, rather
+#     than from the model's guess at punctuation - everything downstream that
+#     counts sentences depends on these;
+#   * a per-chunk confidence, so one mumbled passage is visible instead of
+#     being averaged away across a whole lecture.
+#
+# It costs more wall time, because the model is invoked per chunk.
+# ---------------------------------------------------------------------------
+
+_TERMINAL_PUNCTUATION = ".!?"
+
+
+def _ensure_terminal_period(text: str) -> str:
+    """Append the paper's "." to a recognised chunk unless it already has one.
+
+    Section 3.3 appends a period to every chunk, because the pause that ended
+    the chunk is the sentence boundary. Whisper often punctuates already, so
+    adding one unconditionally would produce ".." - the intent is one terminal
+    mark, not literally one more character.
+    """
+    text = text.strip()
+    if not text:
+        return ""
+    return text if text[-1] in _TERMINAL_PUNCTUATION else text + "."
+
+
+def detect_language(model, audio_path: Path) -> tuple[str | None, float | None]:
+    """Identify the spoken language before transcribing (Section 3.2).
+
+    LNT is a multilanguage framework: it detects the language first so the
+    recogniser can be told what to expect, and so the translation step knows
+    whether it is needed at all.
+    """
+    try:
+        _, info = model.transcribe(str(audio_path), language=None, beam_size=1)
+        return getattr(info, "language", None), getattr(info, "language_probability", None)
+    except Exception as exc:  # noqa: BLE001 - detection is advisory
+        logger.warning("language detection failed: %s", exc)
+        return None, None
+
+
+class LNTTranscriber(Transcriber):
+    """Whisper driven through the LNT framework's audio pipeline.
+
+    The recogniser is still Whisper - the paper used the SpeechRecognition
+    library against Google's API, which needs a network round trip per chunk
+    and cannot run offline. The *pipeline* around it is the paper's.
+    """
+
+    name = "lnt_faster_whisper"
+
+    def __init__(self, base: FasterWhisperTranscriber | None = None):
+        self.base = base or FasterWhisperTranscriber()
+
+    def _load_model(self):
+        return self.base._load_model()
+
+    def transcribe(self, audio_path: Path, language: str | None = None) -> TranscriptionResult:
+        from app.audio.chunking import split_on_silence_to_files
+        from app.audio.normalization import normalize
+
+        settings = get_settings()
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            raise TranscriptionError(f"audio file not found: {audio_path}")
+
+        model = self._load_model()
+
+        # --- 1. normalise (Section 3.3) ------------------------------------
+        try:
+            normalized = normalize(audio_path)
+        except Exception as exc:  # noqa: BLE001
+            # Losing normalisation degrades chunking; losing the capture does
+            # not have to follow.
+            logger.warning("normalisation failed (%s); using the raw audio", exc)
+            normalized = audio_path
+
+        # --- 2. detect the language (Section 3.2) --------------------------
+        detected, probability = (language, None)
+        if language is None:
+            detected, probability = detect_language(model, normalized)
+
+        # The paper standardises everything to English before analysis. Whisper
+        # does that itself, so no external translation service is involved.
+        task = "transcribe"
+        if (
+            settings.translate_to_english
+            and detected
+            and not detected.startswith("en")
+        ):
+            task = "translate"
+            logger.info("source language %r; translating to English", detected)
+
+        # --- 3. split on silence (Section 3.3) -----------------------------
+        try:
+            chunk_paths = split_on_silence_to_files(normalized)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("chunking failed (%s); recognising the whole file", exc)
+            chunk_paths = [normalized]
+
+        # --- 4. recognise each chunk, append "." ---------------------------
+        segments: list[TranscriptSegment] = []
+        pieces: list[str] = []
+        elapsed = 0.0
+
+        for index, chunk_path in enumerate(chunk_paths):
+            try:
+                chunk_segments, _info = model.transcribe(
+                    str(chunk_path),
+                    language=detected if task == "transcribe" else None,
+                    task=task,
+                    beam_size=settings.whisper_beam_size,
+                    vad_filter=False,  # chunking already removed the silence
+                )
+                chunk_segments = list(chunk_segments)
+            except Exception as exc:  # noqa: BLE001
+                # One unrecognisable chunk must not cost the whole lecture.
+                logger.warning("chunk %d failed: %s", index, exc)
+                continue
+
+            text = " ".join(s.text.strip() for s in chunk_segments if s.text.strip())
+            text = _ensure_terminal_period(text)
+
+            duration = _chunk_duration_seconds(chunk_path)
+            if text:
+                pieces.append(text)
+                logprobs = [
+                    s.avg_logprob for s in chunk_segments if getattr(s, "avg_logprob", None)
+                ]
+                no_speech = [
+                    s.no_speech_prob
+                    for s in chunk_segments
+                    if getattr(s, "no_speech_prob", None) is not None
+                ]
+                segments.append(
+                    TranscriptSegment(
+                        start=elapsed,
+                        end=elapsed + duration,
+                        text=text,
+                        avg_logprob=sum(logprobs) / len(logprobs) if logprobs else None,
+                        no_speech_prob=sum(no_speech) / len(no_speech) if no_speech else None,
+                    )
+                )
+            elapsed += duration
+
+        full_text = " ".join(pieces).strip()
+        logger.info(
+            "LNT pipeline: %d chunk(s) -> %d recognised, %d words",
+            len(chunk_paths), len(segments), len(full_text.split()),
+        )
+
+        return TranscriptionResult(
+            text=full_text,
+            language="en" if task == "translate" else detected,
+            language_probability=probability,
+            duration_seconds=elapsed or None,
+            model=f"{self.name}:{self.base.model_size}",
+            segments=segments,
+            source_language=detected,
+            translated=task == "translate",
+            chunk_count=len(chunk_paths),
+        )
+
+
+def _chunk_duration_seconds(path: Path) -> float:
+    import wave
+
+    try:
+        with wave.open(str(path), "rb") as handle:
+            return handle.getnframes() / float(handle.getframerate() or 1)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 _default_transcriber: Transcriber | None = None
 
 
 def get_transcriber() -> Transcriber:
-    """Process-wide transcriber, so the model is loaded at most once."""
+    """Process-wide transcriber, so the model is loaded at most once.
+
+    `ASR_PIPELINE` selects between the paper's route and the single-shot call.
+    """
     global _default_transcriber
     if _default_transcriber is None:
-        _default_transcriber = FasterWhisperTranscriber()
+        if get_settings().asr_pipeline == "direct":
+            _default_transcriber = FasterWhisperTranscriber()
+        else:
+            _default_transcriber = LNTTranscriber()
     return _default_transcriber
 
 
