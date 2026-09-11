@@ -1,34 +1,198 @@
 /**
- * HTTP client. Every call goes through here so errors surface in one place.
+ * Backend client.
  *
- * Errors carry a `spoken` field from the backend (`app/core/errors.py`): the sentence to announce.
- * A failure that only appears on screen is invisible to this app's users.
+ * Every request goes through `request()` so failures surface in one place and
+ * always carry a sentence that can be read aloud. A screen reader user cannot
+ * see a red box, so an error that only exists on screen is an error they never
+ * learn about.
+ *
+ * Requests go to `/api/v1`, which Vite proxies to http://127.0.0.1:8000
+ * (see vite.config.ts).
  */
 
-export interface ApiError {
+import type {
+  CaptureResponse,
+  CaptureSource,
+  Health,
+  NoteSummary,
+  Outline,
+  RecordingState,
+  ReminderList,
+  TriggerRequest,
+  VoiceQueryRequest,
+  VoiceQueryResponse,
+} from "@/types";
+
+const BASE = "/api/v1";
+
+export class ApiError extends Error {
   status: number;
-  message: string;
-  spoken: string;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
 }
 
-export const API_BASE = "/api/v1";
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...init,
+    });
+  } catch {
+    // fetch only rejects on network failure, which nearly always means the
+    // backend is not running. Say that, rather than "Failed to fetch".
+    throw new ApiError(
+      "Cannot reach the backend. Is it running on port 8000?",
+      0,
+    );
+  }
 
-export async function apiGet<T>(_path: string): Promise<T> {
-  throw new Error("not implemented");
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const body = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = body ? JSON.parse(body) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const detail =
+      (parsed as { detail?: unknown } | null)?.detail ?? response.statusText;
+    throw new ApiError(
+      typeof detail === "string" ? detail : JSON.stringify(detail),
+      response.status,
+    );
+  }
+
+  return parsed as T;
 }
 
-export async function apiPost<T>(_path: string, _body?: unknown): Promise<T> {
-  throw new Error("not implemented");
+// --- capture ---------------------------------------------------------------
+
+export function getHealth(): Promise<Health> {
+  return request<Health>("/health");
 }
 
-export async function apiPatch<T>(_path: string, _body: unknown): Promise<T> {
-  throw new Error("not implemented");
+export async function listCaptureSources(): Promise<CaptureSource[]> {
+  return expectArray(
+    await request<CaptureSource[]>(`${BASE}/capture/sources`),
+    "capture sources",
+  );
 }
 
-export async function apiDelete(_path: string): Promise<void> {
-  throw new Error("not implemented");
+export function trigger(payload: TriggerRequest = {}): Promise<CaptureResponse> {
+  return request<CaptureResponse>(`${BASE}/trigger`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
-export async function apiUpload<T>(_path: string, _file: Blob, _fields?: Record<string, string>): Promise<T> {
-  throw new Error("not implemented");
+// --- live recording --------------------------------------------------------
+
+export function startRecording(): Promise<RecordingState> {
+  return request<RecordingState>(`${BASE}/capture/start`, { method: "POST" });
+}
+
+export function recordingState(): Promise<RecordingState> {
+  return request<RecordingState>(`${BASE}/capture/state`);
+}
+
+export function stopRecording(): Promise<CaptureResponse> {
+  return request<CaptureResponse>(`${BASE}/capture/stop`, { method: "POST" });
+}
+
+export function cancelRecording(): Promise<RecordingState> {
+  return request<RecordingState>(`${BASE}/capture/cancel`, { method: "POST" });
+}
+
+// --- notes -----------------------------------------------------------------
+
+export async function listNotes(limit = 20): Promise<NoteSummary[]> {
+  return expectArray(
+    await request<NoteSummary[]>(`${BASE}/notes?limit=${limit}`),
+    "notes",
+  );
+}
+
+export function getNote(noteId: string): Promise<CaptureResponse> {
+  return request<CaptureResponse>(`${BASE}/notes/${noteId}`);
+}
+
+export function deleteNote(noteId: string): Promise<void> {
+  return request<void>(`${BASE}/notes/${noteId}`, { method: "DELETE" });
+}
+
+// --- hierarchy -------------------------------------------------------------
+
+export async function getOutline(): Promise<Outline> {
+  const payload = await request<Outline>(`${BASE}/hierarchy/outline`);
+  return {
+    overview: payload?.overview ?? {
+      subject_count: 0,
+      topic_count: 0,
+      note_count: 0,
+      notes_by_type: {},
+      spoken: "",
+    },
+    subjects: expectArray(payload?.subjects, "hierarchy"),
+  };
+}
+
+// --- retrieval -------------------------------------------------------------
+
+export function ask(payload: VoiceQueryRequest): Promise<VoiceQueryResponse> {
+  return request<VoiceQueryResponse>(`${BASE}/retrieval/query`, {
+    method: "POST",
+    body: JSON.stringify({ speak: false, ...payload }),
+  });
+}
+
+// --- reminders -------------------------------------------------------------
+
+export async function upcomingReminders(
+  withinHours = 168,
+): Promise<ReminderList> {
+  const payload = await request<ReminderList>(
+    `${BASE}/reminders/upcoming?within_hours=${withinHours}`,
+  );
+  return {
+    ...payload,
+    reminders: expectArray(payload?.reminders, "reminders"),
+    count: payload?.count ?? 0,
+  };
+}
+
+export function completeReminder(reminderId: string): Promise<unknown> {
+  return request(`${BASE}/reminders/${reminderId}/done`, { method: "POST" });
+}
+
+/**
+ * Guard a value the UI is about to iterate.
+ *
+ * A misrouted request (a dev-server proxy rule that does not cover the path,
+ * say) answers with an HTML page, not the array the caller expects. Without
+ * this check that lands as `notes.map is not a function` mid-render and blanks
+ * the whole page — which for a screen-reader user is silence with no
+ * explanation. Failing here turns it into a sentence they can hear.
+ */
+function expectArray<T>(value: unknown, what: string): T[] {
+  if (!Array.isArray(value)) {
+    throw new ApiError(`The server returned an unexpected ${what} response.`, 0);
+  }
+  return value as T[];
+}
+
+/** Turn any thrown value into something safe to display and to announce. */
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
