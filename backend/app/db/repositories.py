@@ -368,3 +368,73 @@ class TopicRepository:
             return False
         self.db.delete(topic)
         return True
+
+
+class LntAnalysisRepository:
+    """Stores the Section 3.4 analysis artefacts for a note.
+
+    The nested structures are serialised to JSON on the way in and parsed on the
+    way out, so callers deal in plain Python and never see the encoding.
+    """
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def upsert(self, note_id: str, analysis) -> "LntAnalysisRow":
+        import json
+
+        from app.db.models import LntAnalysisRow
+
+        payload = {
+            "summary": analysis.summary,
+            "themes": json.dumps(analysis.themes),
+            "lda_topics": json.dumps(analysis.lda_topics),
+            "word_frequencies": json.dumps(
+                dict(sorted(analysis.word_frequencies.items(), key=lambda kv: -kv[1])[:200])
+            ),
+            "density": json.dumps({**analysis.density, "zipf": analysis.zipf}),
+            "word_count": analysis.word_count,
+            "sentence_count": analysis.sentence_count,
+        }
+
+        existing = self.db.execute(
+            select(LntAnalysisRow).where(LntAnalysisRow.note_id == note_id)
+        ).scalar_one_or_none()
+
+        if existing is not None:
+            for key, value in payload.items():
+                setattr(existing, key, value)
+            self.db.flush()
+            return existing
+
+        row = LntAnalysisRow(note_id=note_id, **payload)
+        self.db.add(row)
+        self.db.flush()
+        return row
+
+    def get_for_note(self, note_id: str) -> dict | None:
+        import json
+
+        from app.db.models import LntAnalysisRow
+
+        row = self.db.execute(
+            select(LntAnalysisRow).where(LntAnalysisRow.note_id == note_id)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+
+        def parse(raw: str, fallback):
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError):
+                return fallback
+
+        return {
+            "summary": row.summary,
+            "themes": parse(row.themes, []),
+            "lda_topics": parse(row.lda_topics, []),
+            "word_frequencies": parse(row.word_frequencies, {}),
+            "density": parse(row.density, {}),
+            "word_count": row.word_count,
+            "sentence_count": row.sentence_count,
+        }
