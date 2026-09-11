@@ -153,6 +153,16 @@ class Note(Base):
     asr_no_speech_prob: Mapped[float | None] = mapped_column(Float, nullable=True)
     asr_segment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # --- LNT multilanguage evidence (paper Sections 3.2-3.3) ---
+    #: What the speaker actually spoke, before any translation. `language`
+    #: above is the language of the stored text, which is English whenever a
+    #: translation happened - keeping both is what makes the multilanguage
+    #: path auditable rather than invisible.
+    source_language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    translated: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Number of silence-split chunks the recording produced.
+    chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # --- Phase 3: hierarchy placement ---
     # Nullable because a note exists (with its transcript) the instant it is
     # captured, before understanding or organization have run. In steady
@@ -177,6 +187,9 @@ class Note(Base):
     )
     entities: Mapped[list[Entity]] = relationship(
         back_populates="note", cascade="all, delete-orphan"
+    )
+    lnt_analysis: Mapped[LntAnalysisRow | None] = relationship(
+        back_populates="note", cascade="all, delete-orphan", uselist=False
     )
     topic: Mapped[Topic | None] = relationship(back_populates="notes")
 
@@ -207,7 +220,11 @@ class Understanding(Base):
 
     # --- Quality scoring ---
     readability: Mapped[float] = mapped_column(Float, default=0.0)
+    # Table 2 defines four metrics; cohesion and entropy were missing while the
+    # quality score used a different formula.
+    cohesion: Mapped[float] = mapped_column(Float, default=0.0)
     coherence: Mapped[float] = mapped_column(Float, default=0.0)
+    entropy: Mapped[float] = mapped_column(Float, default=0.0)
     transcription_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     quality_score: Mapped[float] = mapped_column(Float, default=0.0)
 
@@ -365,3 +382,37 @@ class NoteContact(Base):
 
     note: Mapped[Note] = relationship(back_populates="contact_links")
     contact: Mapped[Contact] = relationship(back_populates="mentions")
+
+
+class LntAnalysisRow(Base):
+    """The LNT qualitative content analysis for one note (paper §3.4).
+
+    Summary, themes, LDA topics and the word-frequency table are stored as JSON
+    because their shape is nested and they are read back whole, never queried
+    field by field.
+    """
+
+    __tablename__ = "note_lnt_analysis"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    note_id: Mapped[str] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), unique=True, index=True
+    )
+
+    #: §3.4.5 extractive summary - the paper's "minutes" of the lecture
+    summary: Mapped[str] = mapped_column(Text, default="")
+    #: §3.4.6 themes, each with its topics (the shape of the paper's Table 5)
+    themes: Mapped[str] = mapped_column(Text, default="[]")
+    #: §3.4.7 LDA topics with their top terms
+    lda_topics: Mapped[str] = mapped_column(Text, default="[]")
+    #: §3.4.4 word frequency table, root-word keys
+    word_frequencies: Mapped[str] = mapped_column(Text, default="{}")
+    #: §5.1 words per theme / per topic, and the Zipf fit
+    density: Mapped[str] = mapped_column(Text, default="{}")
+
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    sentence_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    note: Mapped[Note] = relationship(back_populates="lnt_analysis")
