@@ -25,11 +25,32 @@ SQLAlchemy>=2.0.36
 # heavyweight ML dependency was added for Phase 3).
 numpy>=1.26
 
+# ---- LNT audio pipeline [P1] (paper Section 3.3) ----
+# Normalisation and silence-based chunking, using the library the paper names.
+# audioop-lts backports the stdlib `audioop` module that pydub depends on and
+# that Python 3.13 removed (PEP 594).
+pydub>=0.25.1
+audioop-lts>=0.2.1; python_version >= "3.13"
+
+# Optional: waveform figures (the paper's Figures 2 and 3). Diagnostics only.
+# matplotlib>=3.8
+
 # ---- Speech to text [P1] ----
 # faster-whisper bundles audio decoding through PyAV, so no separate ffmpeg
 # binary is required. It also exposes per-segment avg_logprob / no_speech_prob,
 # which the Phase 2 transcription-confidence metric is built on.
 faster-whisper>=1.1.0
+
+# ---- LNT NLP tasks (paper Section 3.4) ----
+# 3.4.1 tokenization, 3.4.2 WordNetLemmatizer/Morphy, 3.4.6 hapaxes and
+# collocations. Run `python scripts/bootstrap_nltk.py` once after installing.
+nltk>=3.9
+# 3.4.3 Word2Vec (CBOW and continuous skip-gram)
+gensim>=4.3
+# 3.4.5 sentence-similarity graph and PageRank ranking
+networkx>=3.0
+# 3.4.7 Latent Dirichlet Allocation, and Equation 4 min-max normalisation
+scikit-learn>=1.4
 
 # ---- Understanding [P2] ----
 dateparser>=1.2.0
