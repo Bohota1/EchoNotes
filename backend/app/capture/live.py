@@ -6,9 +6,17 @@ a person: you cannot know in advance how long a thought takes, and a fixed
 window either cuts you off or leaves you waiting in silence.
 
 This records until told to stop. The audio arrives on a PortAudio callback
-thread and is accumulated under a lock, so `start()` and `stop()` return
-immediately and the HTTP request that called them is never blocked for the
-length of the recording.
+thread and is accumulated there, so `start()` and `stop()` return immediately
+and the HTTP request that called them is never blocked for the length of the
+recording.
+
+**The callback takes no lock, deliberately.** It runs on PortAudio's real-time
+audio thread against a hard deadline; if it blocks, PortAudio discards that
+input buffer and the recording comes back with stretches of digital silence
+where the speech should be - a 20-second capture yielding one sentence, with no
+error anywhere. `list.append` is atomic under the GIL, which is all the
+synchronisation handing blocks to `stop()` actually needs. `stop()` closes the
+stream before it touches `_blocks`, so no callback can still be running by then.
 
 One recorder per process, reached through `get_live_recorder()`. There is one
 microphone, so a second concurrent recording is a conflict, not a queue.
@@ -96,24 +104,33 @@ class LiveRecorder:
         settings = get_settings()
         max_frames = settings.max_capture_seconds * TARGET_SAMPLE_RATE
 
-        with self._lock:
-            self._blocks = []
-            self._hit_limit = False
-            frames_held = 0
+        # Reset before the stream opens, so the callback never races this.
+        self._blocks = []
+        self._hit_limit = False
+        frames_held = 0
 
         def callback(indata, _frames, _time_info, status):
             nonlocal frames_held
+            # This runs on PortAudio's real-time audio thread, which has a hard
+            # deadline. It must not block, and it must not acquire a lock that
+            # any other thread holds - a callback that overruns its deadline
+            # makes PortAudio discard the input buffer, and the recording comes
+            # back with stretches of digital silence where the speech was.
+            # `list.append` is atomic under the GIL, so no lock is needed to
+            # hand blocks to `stop()`.
             if status:
-                logger.debug("input stream status: %s", status)
-            with self._lock:
-                if frames_held >= max_frames:
-                    # Stop accumulating rather than growing without bound. The
-                    # stream stays open so `stop()` remains the only thing that
-                    # ends a recording, from the caller's point of view.
-                    self._hit_limit = True
-                    return
-                self._blocks.append(indata.copy())
-                frames_held += len(indata)
+                # Logged at warning, not debug: `input overflow` here is the
+                # direct cause of dropped audio, and it is the only warning the
+                # user will ever get that their recording has holes in it.
+                logger.warning("input stream status: %s", status)
+            if frames_held >= max_frames:
+                # Stop accumulating rather than growing without bound. The
+                # stream stays open so `stop()` remains the only thing that
+                # ends a recording, from the caller's point of view.
+                self._hit_limit = True
+                return
+            self._blocks.append(indata.copy())
+            frames_held += len(indata)
 
         try:
             self._stream = sd.InputStream(
@@ -121,6 +138,12 @@ class LiveRecorder:
                 channels=TARGET_CHANNELS,
                 dtype="int16",
                 callback=callback,
+                # A larger block and relaxed latency give the callback far more
+                # headroom before PortAudio starts dropping buffers. Capture
+                # here is a background task feeding a transcriber, not live
+                # monitoring, so added latency costs nothing.
+                blocksize=settings.capture_blocksize,
+                latency="high",
             )
             self._stream.start()
         except Exception as exc:
