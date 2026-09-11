@@ -1,70 +1,32 @@
 """Token normalisation for retrieval (Phase 4).
 
-Two measured problems with matching raw text, both specific to retrieval:
+Retrieval needs both sides of a comparison - the indexed note and the query -
+normalised identically, or matching silently fails. Measured: before this,
+searching "deadlocks" against a note that says "deadlock" scored *exactly zero*
+on the hashed backend. Different strings hash to different buckets, so the
+vectors are orthogonal, and people do not reliably match their own notes'
+grammatical number when speaking a query.
 
-**Plurals.** Searching "deadlocks" against a note that says "deadlock" scored
-*exactly zero* on the hashed backend - the tokens are different strings, so they
-hash to different buckets and the vectors are orthogonal. People do not
-reliably match their own notes' grammatical number when speaking a query, so
-this is a total recall failure on an extremely common phrasing. The LNT paper
-(Saini et al. 2023, Section 3.3) lists "converting plural words to singular
-words" as a preprocessing step for exactly this reason; it is not implemented in
-the shared `app/nlp/preprocess.py`, so it is applied here, on the retrieval path
-only.
+The singulariser itself lives in `app.nlp.preprocess` - it is LNT §3.3's
+*"converting plural words to singular words"* step, and the paper puts it in
+preprocessing, not in retrieval. This module reuses it rather than keeping a
+second copy, so there is one definition of what a singular form is and the two
+cannot drift apart.
 
-**Scope.** This normalisation is deliberately *not* pushed into
-`app.nlp.preprocess` or `app.hierarchy.embeddings`. Those are Team Member 1's
-and Team Member 2's, and changing what "similar" means there would silently
-change topic-assignment behaviour and every threshold tuned against it. Applying
-it in the retrieval provider instead means both sides of a comparison - the
-indexed note and the query - normalise identically, which is the only property
-matching actually requires.
-
-The stemmer is deliberately conservative. Over-stemming collapses words that
-mean different things ("bus" -> "bu"), and a false match is worse than a missed
-one when the result is read aloud as though it were an answer.
+Applied here at query and index time, **not** by changing
+`app.hierarchy.embeddings`, so Team Member 2's topic assignment keeps the exact
+behaviour its similarity thresholds were tuned against.
 """
 
 from __future__ import annotations
 
 import re
 
+from app.nlp.preprocess import singularize
+
+__all__ = ["singularize", "normalize_tokens", "normalize_for_matching"]
+
 _TOKEN_RE = re.compile(r"[a-z0-9']+")
-
-#: Words that end in 's' but are not plurals. Stripping the 's' from these
-#: creates a token that matches nothing, or worse, matches something unrelated.
-_NOT_PLURAL = frozenset(
-    """
-    is was has does goes gas bus plus this thus yes news analysis basis crisis
-    thesis hypothesis series species access process address class glass pass
-    less unless across always perhaps its his hers ours yours theirs status
-    focus campus virus bonus census physics mathematics statistics economics
-    politics ethics graphics logistics
-    """.split()
-)
-
-_ES_ENDINGS = ("ses", "xes", "zes", "ches", "shes")
-
-
-def singularize(token: str) -> str:
-    """Best-effort English singular. Returns `token` unchanged when unsure."""
-    if len(token) <= 3 or token in _NOT_PLURAL or not token.endswith("s"):
-        return token
-
-    # "policies" -> "policy", but not "series" (caught above).
-    if token.endswith("ies") and len(token) > 4:
-        return token[:-3] + "y"
-
-    # "classes" -> "class", "boxes" -> "box", "batches" -> "batch".
-    for ending in _ES_ENDINGS:
-        if token.endswith(ending) and len(token) > len(ending) + 1:
-            return token[:-2]
-
-    # "deadlocks" -> "deadlock". Never strip from "-ss" ("class").
-    if not token.endswith("ss"):
-        return token[:-1]
-
-    return token
 
 
 def normalize_tokens(text: str) -> list[str]:
