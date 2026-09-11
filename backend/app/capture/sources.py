@@ -169,7 +169,9 @@ class MicrophoneCaptureSource(AudioCaptureSource):
         import sounddevice as sd
 
         settings = get_settings()
-        seconds = max_seconds or self.seconds or settings.max_capture_seconds
+        seconds = max_seconds or self.seconds or settings.default_capture_seconds
+        # Never record longer than the hard cap, however the caller asked.
+        seconds = max(1, min(int(seconds), settings.max_capture_seconds))
         frames = int(seconds * TARGET_SAMPLE_RATE)
 
         logger.info("recording %ss from the default input device", seconds)
@@ -259,3 +261,20 @@ def get_capture_source(name: str | None = None) -> AudioCaptureSource:
         raise AudioCaptureError(
             f"unknown capture source {resolved!r}; known: {', '.join(sorted(SOURCES))}"
         ) from None
+
+
+class PreRecordedSource(AudioCaptureSource):
+    """Hands the pipeline audio that has already been recorded.
+
+    Lets a start/stop recording (`app.capture.live`) or an upload go through the
+    identical `run_capture` path as a triggered one, instead of duplicating the
+    transcribe → understand → store stages for each way audio can arrive.
+    """
+
+    name = "pre-recorded"
+
+    def __init__(self, captured: CapturedAudio):
+        self.captured = captured
+
+    def capture(self, max_seconds: int | None = None) -> CapturedAudio:
+        return self.captured
