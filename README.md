@@ -55,6 +55,34 @@ cd backend && pip install -r requirements.txt
 cd backend && uvicorn app.main:app --reload
 ```
 
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open <http://localhost:5173>. The dev server proxies `/api` and `/health` to the
+backend on port 8000, so run the backend first.
+
+```bash
+cd frontend
+npm run build     # production bundle into dist/
+npx vitest run    # component smoke tests
+```
+
+### If the notes list returns 500
+
+`create_all()` creates missing tables but never adds a column to an existing
+one, so a database file created before a column was added will fail every query
+against that table. Fix it without losing notes:
+
+```bash
+cd backend
+python scripts/sync_db_schema.py --apply
+```
+
 That is all that is required. `POST /api/v1/trigger` works immediately on a fresh machine: the
 default `dummy` capture source replays a fixture wav, so no microphone is needed. Interactive API
 docs are at http://127.0.0.1:8000/docs.
@@ -421,6 +449,8 @@ collaboration half (DG3) and voting (DG4) — EchoNotes is single-user.
   transcription.
 - **OCR (Feature 7) is a stub.** `app/ocr/` is unimplemented and unmounted.
 - **The LNT NLP modules are stubs** — summarization, thematic analysis, topic modeling.
-- **No frontend wiring.** `frontend/` holds scaffolded components; none are connected to the API.
+- **The frontend is a basic shell.** `frontend/` now has a working UI wired to the
+  API (capture, ask, notes, reminders), but not the Subject/Topic outline — the
+  hierarchy endpoints exist and are unused by the UI.
 - **Default retrieval is lexical, not semantic.** See
   [docs/retrieval-handoff.md](docs/retrieval-handoff.md), "Assumptions and open items".
