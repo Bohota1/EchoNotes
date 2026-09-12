@@ -236,6 +236,58 @@ def detect_language(model, audio_path: Path) -> tuple[str | None, float | None]:
         return None, None
 
 
+#: Phrases Whisper emits when it has nothing to transcribe. It was trained on
+#: subtitled video, so silence gets filled with the sign-offs that end one.
+#: Matched only when the whole segment is one of them - a real note may well
+#: contain the words "thank you".
+_HALLUCINATED_ON_SILENCE = frozenset(
+    phrase.lower()
+    for phrase in (
+        "Thank you.", "Thank you for watching.", "Thanks for watching.",
+        "Thank you for watching!", "Thanks for watching!",
+        "Please subscribe.", "Like and subscribe.",
+        "You", "Bye.", "Bye-bye.", "Okay.",
+        "Subtitles by the Amara.org community",
+        "Transcription by ESO. Translation by -",
+    )
+)
+
+
+def _is_speech(segment) -> bool:
+    """Whether a segment is really speech, or Whisper filling a silence.
+
+    Two signals, and the first is the honest one: Whisper reports a
+    `no_speech_prob` per segment and then emits text regardless of it. Measured
+    on a near-silent capture, it produced "Thank you for watching." at
+    no_speech_prob 0.61 and the app stored that as the user's note.
+
+    Dropping a real quiet sentence is a cost worth paying against that. A missed
+    note is visible - the user sees nothing was saved and repeats it. An
+    invented one is not: it sits in the notes looking exactly like something
+    they said.
+    """
+    from app.config import get_settings
+
+    text = (getattr(segment, "text", "") or "").strip()
+    if not text:
+        return False
+
+    probability = getattr(segment, "no_speech_prob", None)
+    if probability is not None and probability >= get_settings().whisper_no_speech_threshold:
+        logger.info(
+            "dropping segment %r (no_speech_prob %.2f)", text[:60], probability
+        )
+        return False
+
+    if text.lower().strip(" .!?") in {
+        p.strip(" .!?") for p in _HALLUCINATED_ON_SILENCE
+    }:
+        logger.info("dropping known silence artefact %r", text[:60])
+        return False
+
+    return True
+
+
 class LNTTranscriber(Transcriber):
     """Whisper driven through the LNT framework's audio pipeline.
 
@@ -293,16 +345,36 @@ class LNTTranscriber(Transcriber):
         not follow the paper's Section 3.3.
         """
         settings = get_settings()
-        segments, info = model.transcribe(
-            str(normalized),
-            language=detected if task == "transcribe" else None,
-            task=task,
-            beam_size=settings.whisper_beam_size,
-            vad_filter=settings.whisper_vad_filter,
-            initial_prompt=self._prompt_for_chunk([]),
-        )
-        segments = list(segments)
-        text = " ".join(s.text.strip() for s in segments if s.text.strip())
+
+        def run(vad: bool):
+            segments, info = model.transcribe(
+                str(normalized),
+                language=detected if task == "transcribe" else None,
+                task=task,
+                beam_size=settings.whisper_beam_size,
+                vad_filter=vad,
+                initial_prompt=self._prompt_for_chunk([]),
+            )
+            segments = [s for s in segments if _is_speech(s)]
+            return segments, info, " ".join(
+                s.text.strip() for s in segments if s.text.strip()
+            )
+
+        segments, info, text = run(settings.whisper_vad_filter)
+
+        if not text.strip() and settings.whisper_vad_filter:
+            # Voice-activity detection decided the whole recording was silence.
+            # It is tuned for long audio with real gaps, and on a short or quiet
+            # note it discards the speech itself - measured: a six-second
+            # capture of "So, hi." transcribed as nothing with VAD on and
+            # correctly with it off.
+            #
+            # Retried only when VAD found nothing at all, so a normal recording
+            # keeps the benefit and a quiet one is not silently lost. The cost
+            # of being wrong the other way is a note the user spoke and the app
+            # threw away without saying so.
+            logger.info("VAD found no speech; retrying without it")
+            segments, info, text = run(False)
 
         collected = [
             TranscriptSegment(
