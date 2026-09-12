@@ -24,7 +24,7 @@ uniform across the whole voice surface.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -73,8 +73,21 @@ def handle_voice_query(
     focused_note_id: str | None = None,
     top_k: int | None = None,
     now: datetime | None = None,
+    session_id: str | None = None,
 ) -> VoiceQueryOutcome:
-    """Resolve and answer one spoken utterance."""
+    """Resolve and answer one spoken utterance.
+
+    With a `session_id`, a follow-up is resolved against the conversation so
+    far before anything is retrieved - "how does it relate to system design"
+    only finds the right notes once "it" has been replaced. Grounding does not
+    change: the answer is still built solely from what retrieval returns.
+    """
+    from app.rag.conversation import get_conversation_store, resolve_follow_up
+
+    conversation = get_conversation_store().get(session_id)
+    if conversation is not None:
+        utterance = resolve_follow_up(utterance, conversation)
+
     parsed = parse_intent(utterance, now=now)
     logger.info(
         "voice query intent=%s query=%r target=%r types=%s time=%r",
@@ -106,7 +119,27 @@ def handle_voice_query(
     if parsed.intent == Intent.NAVIGATE:
         return _handle_navigate(db, parsed)
 
-    return _handle_content_query(db, parsed, top_k=top_k)
+    if parsed.intent == Intent.READ_ALOUD:
+        return _handle_read_aloud(db, parsed)
+
+    history = ""
+    if conversation is not None:
+        history = conversation.transcript(
+            limit=get_settings().conversation_context_turns
+        )
+
+    outcome = _handle_content_query(db, parsed, top_k=top_k, history=history)
+
+    if conversation is not None:
+        # The rewritten question is what goes in the history, not the raw
+        # utterance: "how does it relate to system design" would leave the
+        # next turn resolving a pronoun against another pronoun.
+        conversation.add(
+            utterance,
+            outcome.answer_text or outcome.spoken,
+            get_settings().conversation_max_turns,
+        )
+    return outcome
 
 
 # ---------------------------------------------------------------------------
@@ -115,10 +148,15 @@ def handle_voice_query(
 
 
 def _handle_content_query(
-    db: Session, parsed: ParsedIntent, top_k: int | None = None
+    db: Session,
+    parsed: ParsedIntent,
+    top_k: int | None = None,
+    history: str = "",
 ) -> VoiceQueryOutcome:
     result: RetrievalResult = retrieve(db, parsed.query, parsed, top_k=top_k)
-    grounded: GroundedAnswer = answer(parsed.raw, result, parsed.intent)
+    grounded: GroundedAnswer = answer(
+        parsed.raw, result, parsed.intent, history=history
+    )
 
     spoken = grounded.spoken
     earcon = Earcon.RESULTS_FOUND.value if result.notes else Earcon.NO_RESULTS.value
@@ -358,6 +396,96 @@ def _handle_navigate(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
         spoken=text,
         answer_text=text,
         speech=_voice(text, earcon=Earcon.NO_RESULTS.value),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reading notes back verbatim
+# ---------------------------------------------------------------------------
+
+
+def _handle_read_aloud(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
+    """"Read my system design notes out loud."
+
+    The one path that deliberately does not go near the LLM. The user asked for
+    their own words, so summarising them - however well - would be answering a
+    question they did not ask. Retrieval decides *which* notes; nothing rewrites
+    *what* they say.
+
+    A topic name is tried first, because "read my system design notes" almost
+    always means the topic rather than a phrase search. Retrieval is the
+    fallback, so this still works before anything has been filed.
+    """
+    from app.db.repositories import NoteRepository, TopicRepository
+
+    name = (parsed.target_name or parsed.query).strip()
+    if not name:
+        text = "Which notes would you like me to read?"
+        return VoiceQueryOutcome(
+            intent=Intent.READ_ALOUD.value, ok=False, spoken=text, speech=_voice(text)
+        )
+
+    where = name
+    bodies: list[str] = []
+    note_ids: list[str] = []
+
+    topic = TopicRepository(db).find_best_name_match(name)
+    if topic is not None:
+        filed = NoteRepository(db).list_by_topic(topic.id, limit=50)
+        bodies = [
+            (n.cleaned_text or n.raw_transcript or "").strip() for n in filed
+        ]
+        note_ids = [n.id for n in filed]
+        where = topic.name
+
+    bodies = [b for b in bodies if b]
+
+    if not bodies:
+        # Nothing filed under that name - fall back to search, so this works
+        # before the organizer has created a topic for it.
+        #
+        # The name is dropped from the filter first. A topic can exist and be
+        # empty (the organizer creates one from a phrase, then files the note
+        # under a different name), and keeping the scope would restrict the
+        # search to exactly the topic that just turned up nothing - so the
+        # fallback could never find anything the first attempt missed.
+        unscoped = replace(parsed, target_name="")
+        result = retrieve(db, parsed.query or name, unscoped)
+        bodies = [n.text.strip() for n in result.notes if n.text.strip()]
+        note_ids = [n.note_id for n in result.notes]
+        where = name
+
+    if not bodies:
+        text = f"I don't have any notes about {name}."
+        return VoiceQueryOutcome(
+            intent=Intent.READ_ALOUD.value,
+            ok=False,
+            spoken=text,
+            answer_text=text,
+            speech=_voice(text, earcon=Earcon.NO_RESULTS.value),
+        )
+
+    count = len(bodies)
+    # Said before the reading starts: a listener with no screen needs to know
+    # how much is coming before it begins.
+    preamble = f"Reading {count} note{'s' if count != 1 else ''} from {where}."
+    # Numbered aloud so the boundary between notes is audible - without it
+    # several notes run together into one long paragraph.
+    body = (
+        bodies[0]
+        if count == 1
+        else " ".join(f"Note {i}. {b}" for i, b in enumerate(bodies, start=1))
+    )
+    spoken = f"{preamble} {body}"
+
+    return VoiceQueryOutcome(
+        intent=Intent.READ_ALOUD.value,
+        ok=True,
+        spoken=spoken,
+        answer_text=body,
+        sources=note_ids,
+        data={"note_count": count, "read_from": where, "verbatim": True},
+        speech=_voice(spoken, earcon=Earcon.RESULTS_FOUND.value),
     )
 
 
