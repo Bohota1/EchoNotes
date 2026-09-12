@@ -173,6 +173,8 @@ def dismiss(reminder_id: str, db: Session = Depends(get_db)):
 @router.delete(
     "/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete"
 )
+
+
 def delete_reminder(reminder_id: str, db: Session = Depends(get_db)):
     if not ReminderService(db).delete(reminder_id):
         raise HTTPException(status_code=404, detail="reminder not found")
