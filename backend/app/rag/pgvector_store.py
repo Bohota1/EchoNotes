@@ -34,9 +34,6 @@ logger = logging.getLogger(__name__)
 TABLE = "note_vectors"
 
 
-
-
-
 class PgVectorStore(VectorStore):
     """Vector index stored in Postgres via the pgvector extension."""
 
