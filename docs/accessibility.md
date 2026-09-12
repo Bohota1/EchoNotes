@@ -18,6 +18,48 @@ requirement, not a retrofit. Idea11y's design goals are the source for most of w
 5. **Announcements are short and front-loaded.** The identifying information comes first — screen
    reader users interrupt constantly and should not have to wait through a preamble.
 
+## The voice console
+
+Three keys do everything, and every result is spoken. This is the primary interface; the panels
+below it on the page are the same functionality for sighted use.
+
+| Key | Action |
+|---|---|
+| `Space` | Record a note. Press again to stop; the note is transcribed, filed and read back |
+| `Shift` | Open a conversation. Press again to end it |
+| `Enter` | Ask a question. Inside a conversation, follow-ups keep their context |
+| `Escape` | Cancel whatever is in progress |
+
+Both recording keys **toggle**. Hold-to-talk was rejected here: it makes the user keep a finger
+down while thinking, and a key released by accident ends the recording silently.
+
+`Shift` is read on **release**, and only when it was pressed and released with nothing in between.
+It is also a modifier - held down for every capital letter - so a press alone cannot mean anything;
+a bare tap can.
+
+### Why a conversation is a mode
+
+Most questions are one-offs, and keeping history for those makes *retrieval* worse: an unrelated
+previous question drags the search sideways. So context is opened deliberately and closed when the
+topic changes. Inside a conversation a follow-up may say "it", and the question is rewritten to
+stand alone **before** retrieval runs - embedding "how does it relate to system design" searches
+for the words "it relate" and never finds the notes the user meant.
+
+Rewriting changes only what is searched for. Every answer is still built solely from the notes that
+search returns, and a conversation that cannot answer from them says so. A conversation that
+invented continuity would be worse than one with no memory at all, because it sounds more
+trustworthy.
+
+### Reading notes back
+
+"Read my system design notes out loud" is the one retrieval path that never touches the LLM. The
+user asked for their own words, so summarising them - however well - would answer a question they
+did not ask. Retrieval decides *which* notes; nothing rewrites *what* they say. Every other
+question is answered from the retrieved notes, not read from them.
+
+An explicit read verb is what separates the two: "read", "play back", "say". "What is system
+design?" is a question and is answered as one.
+
 ## Keyboard map
 
 | Key | Action | Source |
