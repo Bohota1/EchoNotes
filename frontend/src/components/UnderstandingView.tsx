@@ -34,6 +34,7 @@ function EntityList({ label, values }: { label: string; values: string[] }) {
   );
 }
 
+
 export function UnderstandingView({
   understanding,
 }: {
