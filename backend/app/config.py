@@ -170,6 +170,14 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
     anthropic_api_key: str = ""
     groq_api_key: str = ""
+    # Extra output tokens allowed on top of whatever a caller asks for, to cover
+    # a reasoning model's internal thinking. gpt-oss and similar models spend
+    # output tokens reasoning before they emit any visible text, so a caller
+    # asking for 40 tokens of summary gets an empty string: the budget is gone
+    # before the answer starts. Callers size their budget for the text they
+    # want, which is right; this covers what the model spends getting there.
+    # Set to 0 for a non-reasoning model.
+    groq_reasoning_headroom: int = 512
 
     # ---- Understanding (Phase 2) ----
     # Below these confidences the rule result is treated as unreliable and the
@@ -221,7 +229,11 @@ class Settings(BaseSettings):
 
     # Vector store. "chroma" persists under chroma_dir; "memory" is brute-force
     # numpy with no persistence (what the test suite uses).
-    vector_store: str = "chroma"  # chroma | memory
+    # chroma   - local ChromaDB under chroma_dir
+    # pgvector - same Postgres database as the notes (needs DATABASE_URL
+    #            to be Postgres and the pgvector extension available)
+    # memory   - brute-force numpy, no persistence; what the tests use
+    vector_store: str = "chroma"  # chroma | pgvector | memory
     chroma_dir: Path = BASE_DIR / "data" / "chroma"
 
     # Chunking. A short voice note is one chunk; a lecture is windowed, because
