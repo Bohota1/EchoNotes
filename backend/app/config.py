@@ -191,6 +191,24 @@ class Settings(BaseSettings):
     # sentence "Like." - see `LNTTranscriber._prompt_for_chunk`.
     whisper_carry_context: bool = True
 
+    # ---- Transcript correction (post-ASR LLM review) ----
+    # Whisper decides between candidates on sound plus a shallow language
+    # prior; it does not reason about meaning, so a near-homophone that is a
+    # real word wins when the audio is ambiguous ("still works" -> "steelworks").
+    # An LLM does reason about meaning and repairs exactly that. Off costs
+    # nothing: with no key configured the transcript passes through untouched.
+    llm_correct_transcript: bool = True
+    transcript_correction_max_tokens: int = 1200
+    # Guards against the model rewriting rather than repairing. A transcription
+    # fix swaps a few words; anything that changes the length by more than this,
+    # or leaves less than this much of the wording intact, is prose improvement
+    # and is rejected - see `app/nlp/correction.py`.
+    transcript_correction_max_length_drift: float = 0.25
+    transcript_correction_min_similarity: float = 0.60
+    # Below this, there is too little surrounding meaning to disambiguate
+    # anything, and an over-eager rewrite does proportionally more damage.
+    transcript_correction_min_words: int = 8
+
     # ---- LLM abstraction (Phase 2) ----
     # The pipeline works with no key at all: rules run first and the LLM is
     # consulted only when a rule result is below its confidence floor.
