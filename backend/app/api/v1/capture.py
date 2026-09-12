@@ -136,8 +136,6 @@ def understand_text(
 # which suits a hardware button but not a person - nobody knows in advance how
 # long a thought will take. These three let the user end the recording.
 # ---------------------------------------------------------------------------
-
-
 def _recording_state_out(recorder) -> RecordingState:
     state = recorder.state()
     if state["recording"]:
