@@ -25,6 +25,7 @@ import { CapturePanel } from "@/components/CapturePanel";
 import { GraphPanel } from "@/components/GraphPanel";
 import { NotesPanel } from "@/components/NotesPanel";
 import { RemindersPanel } from "@/components/RemindersPanel";
+import { VoiceConsole } from "@/components/VoiceConsole";
 import { speechSupported, stopSpeaking } from "@/a11y/speech";
 
 function Dashboard() {
@@ -74,6 +75,13 @@ function Dashboard() {
             </p>
           )}
         </section>
+
+        {/* The voice console, first on the page: Space records a note,
+            Shift opens a conversation, Enter asks a question, and every
+            result is spoken. Everything below is the same functionality for
+            sighted use - kept, because "accessible" should not mean "a worse
+            version for everyone else". */}
+        <VoiceConsole onNoteCaptured={onCaptured} />
 
         <CapturePanel onCaptured={onCaptured} autoSpeak={autoSpeak} />
 
