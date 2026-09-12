@@ -157,4 +157,6 @@ def list_web_resources(topic_id: str, db: Session = Depends(get_db)) -> dict:
             }
             for r in resources
         ]
+
+        
     }
