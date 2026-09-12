@@ -525,6 +525,87 @@ select {
   font-size: 0.7rem;
 }
 
+/* --- note content: Note-Taking / Link / Edit areas (NexaNota 4.3.3) ------- */
+
+.note-content {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.content-area {
+  margin: 0.75rem 0;
+}
+.content-area h5,
+.link-group h5 {
+  margin: 0 0 0.2rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.content-block {
+  margin: 0 0 0.6rem;
+}
+.content-block p {
+  margin: 0.15rem 0 0;
+}
+
+.link-group {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--border);
+}
+.resource-list,
+.related-notes-list {
+  margin: 0.2rem 0 0.5rem;
+  padding-left: 1.2rem;
+}
+.resource-list li,
+.related-notes-list li {
+  margin: 0.2rem 0;
+}
+
+.edit-textarea {
+  display: block;
+  width: 100%;
+  font: inherit;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+  margin: 0.3rem 0 0.5rem;
+}
+
+/* --- replay (NexaNota 4.3.1) ----------------------------------------------- */
+
+.replay {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.replay-segments {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+.replay-segment {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+}
+.replay-segment:first-child {
+  border-top: none;
+}
+.replay-time {
+  display: inline-block;
+  margin-right: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.replay-text {
+  margin: 0.3rem 0 0.4rem;
+}
+
 /* --- live recording ------------------------------------------------------ */
 
 .record-row {
@@ -550,4 +631,108 @@ select {
 @keyframes recording-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+
+/* --- graph view toggle + visual (node/edge) diagram ------------------------
+   The diagram is an additional, sighted-first view of the same data the
+   accessible list view already renders (see GraphPanel.tsx / VisualGraph.tsx
+   for why). Nodes are real <button>s positioned over an SVG that only draws
+   the connecting lines, so keyboard focus and the existing focus ring both
+   keep working on them. */
+
+.view-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+.view-toggle button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.visual-graph {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 32rem;
+  margin: 0.75rem auto 1rem;
+}
+.visual-graph-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.graph-edge {
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+.graph-edge-llm {
+  stroke: var(--accent);
+}
+
+.graph-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  padding: 0.35rem;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--bg);
+  color: var(--fg);
+  text-align: center;
+  cursor: pointer;
+}
+.graph-node-recommended {
+  border-style: dashed;
+  border-color: var(--muted);
+}
+.graph-node-open {
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
+  border-width: 3px;
+}
+.graph-node-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.diagram-topic-detail {
+  margin-left: 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--accent);
+}
+
+/* --- cluster graph view -------------------------------------------------
+   Each box is one connected component of the topic graph (everything in it
+   reaches everything else through some chain of connections); topics inside
+   reuse the same .topic/.topic-toggle styling as list view, just grouped. */
+
+.cluster-graph {
+  margin: 0.5rem 0 1rem;
+}
+.topic-cluster {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.topic-cluster:last-child {
+  margin-bottom: 0;
+}
+.cluster-label {
+  margin: 0 0 0.4rem;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
