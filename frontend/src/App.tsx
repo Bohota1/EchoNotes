@@ -1,20 +1,20 @@
 /**
  * EchoNotes — a basic UI over the capture and understanding backend.
  *
- * Four regions, in the order a screen reader user meets them:
+ * Regions, in the order a screen reader user meets them:
  *
- *   1. Status    is the backend reachable, can it capture, is the LLM on
- *   2. Capture   record a note and see what came back
- *   3. Ask       question your notes (retrieval)
- *   4. Notes     what is stored, expandable
- *   5. Reminders what the backend detected as due
+ *   1. Status         is the backend reachable, can it capture, is the LLM on
+ *   2. Capture        record a note and see what came back
+ *   3. Ask            question your notes (retrieval)
+ *   4. Knowledge graph the topics notes were organized into, and how they
+ *                      connect (NexaNota redesign, replacing the old
+ *                      Subject/Topic/Note hierarchy outline)
+ *   5. Notes          what is stored, expandable into its generated content,
+ *                      links, your own edits, and a timestamped replay
+ *   6. Reminders      what the backend detected as due
  *
  * Everything is a real landmark with a real heading, so heading navigation
  * (H / Shift+H in NVDA and JAWS) works without any custom widget code.
- *
- * Deliberately not built here: the Subject/Topic hierarchy outline. The backend
- * has those endpoints, but an accessible outline is a design job of its own and
- * this is the basic shell.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -24,7 +24,7 @@ import { ErrorBoundary } from "@/a11y/ErrorBoundary";
 import { errorMessage, getHealth } from "@/api/client";
 import { AskPanel } from "@/components/AskPanel";
 import { CapturePanel } from "@/components/CapturePanel";
-import { HierarchyPanel } from "@/components/HierarchyPanel";
+import { GraphPanel } from "@/components/GraphPanel";
 import { NotesPanel } from "@/components/NotesPanel";
 import { RemindersPanel } from "@/components/RemindersPanel";
 import { speechSupported, stopSpeaking } from "@/a11y/speech";
@@ -126,7 +126,7 @@ function Dashboard() {
 
         <AskPanel />
 
-        <HierarchyPanel refreshKey={refreshKey} />
+        <GraphPanel refreshKey={refreshKey} />
 
         <div className="columns">
           <NotesPanel refreshKey={refreshKey} />

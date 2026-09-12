@@ -13,14 +13,19 @@
 import type {
   CaptureResponse,
   CaptureSource,
+  GraphTopic,
   Health,
+  NoteContent,
   NoteSummary,
-  Outline,
   RecordingState,
   ReminderList,
+  ReplaySegment,
+  Subject,
+  SubjectGraph,
   TriggerRequest,
   VoiceQueryRequest,
   VoiceQueryResponse,
+  WebResourceList,
 } from "@/types";
 
 const BASE = "/api/v1";
@@ -130,20 +135,55 @@ export function deleteNote(noteId: string): Promise<void> {
   return request<void>(`${BASE}/notes/${noteId}`, { method: "DELETE" });
 }
 
-// --- hierarchy -------------------------------------------------------------
+// --- knowledge graph ---------------------------------------------------
 
-export async function getOutline(): Promise<Outline> {
-  const payload = await request<Outline>(`${BASE}/hierarchy/outline`);
-  return {
-    overview: payload?.overview ?? {
-      subject_count: 0,
-      topic_count: 0,
-      note_count: 0,
-      notes_by_type: {},
-      spoken: "",
-    },
-    subjects: expectArray(payload?.subjects, "hierarchy"),
-  };
+export async function listSubjects(): Promise<Subject[]> {
+  return expectArray(await request<Subject[]>(`${BASE}/graph/subjects`), "subjects");
+}
+
+export function getSubjectGraph(subjectId: string): Promise<SubjectGraph> {
+  return request<SubjectGraph>(`${BASE}/graph/subjects/${subjectId}`);
+}
+
+export async function listNotesUnderTopic(topicId: string): Promise<NoteSummary[]> {
+  return expectArray(
+    await request<NoteSummary[]>(`${BASE}/graph/topics/${topicId}/notes`),
+    "notes",
+  );
+}
+
+export async function listTopicsForNote(noteId: string): Promise<GraphTopic[]> {
+  return expectArray(
+    await request<GraphTopic[]>(`${BASE}/graph/notes/${noteId}/topics`),
+    "topics",
+  );
+}
+
+export async function listWebResources(topicId: string): Promise<WebResourceList> {
+  const payload = await request<WebResourceList>(
+    `${BASE}/graph/topics/${topicId}/web-resources`,
+  );
+  return { resources: expectArray(payload?.resources, "web resources") };
+}
+
+// --- note content (NexaNota 4.3.3) ------------------------------------------
+
+export function getNoteContent(noteId: string): Promise<NoteContent> {
+  return request<NoteContent>(`${BASE}/notes/${noteId}/content`);
+}
+
+export function saveNoteEdit(noteId: string, markdown: string): Promise<NoteContent> {
+  return request<NoteContent>(`${BASE}/notes/${noteId}/content`, {
+    method: "PATCH",
+    body: JSON.stringify({ markdown }),
+  });
+}
+
+export async function getNoteReplay(noteId: string): Promise<ReplaySegment[]> {
+  return expectArray(
+    await request<ReplaySegment[]>(`${BASE}/notes/${noteId}/replay`),
+    "replay segments",
+  );
 }
 
 // --- retrieval -------------------------------------------------------------
