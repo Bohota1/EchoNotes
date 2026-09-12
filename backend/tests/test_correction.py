@@ -107,10 +107,25 @@ class TestPlausibilityRule:
         ok, _ = _is_plausible_correction(ORIGINAL, REPAIRED)
         assert ok
 
-    def test_a_large_length_change_fails(self):
+    def test_a_large_change_fails(self):
         ok, why = _is_plausible_correction(ORIGINAL, "Fault tolerance.")
         assert not ok
-        assert "length" in why
+        assert "words changed" in why or "length changed" in why
+
+    def test_a_one_word_repair_to_short_text_passes(self):
+        """The rule is counted in words, not proportions. A proportion says
+        nothing useful here: fixing one word of three is a 33% length change
+        and a 57% similarity, and neither number describes what happened."""
+        ok, why = _is_plausible_correction(
+            "Various system design.", "What is system design."
+        )
+        assert ok, why
+
+    def test_a_short_text_rewritten_wholesale_still_fails(self):
+        ok, _ = _is_plausible_correction(
+            "Various system design.", "Completely unrelated replacement text."
+        )
+        assert not ok
 
     def test_identical_text_passes(self):
         ok, _ = _is_plausible_correction(ORIGINAL, ORIGINAL)
