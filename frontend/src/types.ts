@@ -153,46 +153,85 @@ export interface ReminderList {
   spoken: string;
 }
 
-// --- hierarchy -------------------------------------------------------------
+// --- knowledge graph (NexaNota redesign, replacing the Subject/Topic/Note
+// hierarchy above) ----------------------------------------------------------
+//
+// A note now gets 2-3 topics extracted directly by the LLM (not matched
+// against a tree), topics become graph nodes, and LLM- or co-occurrence-found
+// links between them become edges. `Subject` is kept as the "course" a graph
+// lives inside - the closest thing this app already had to NexaNota's course
+// grouping.
 
-export interface HierarchyNote {
-  id: string;
-  topic_id: string | null;
-  text: string;
-  note_type: NoteType | null;
-  source: string | null;
-  created_at: string | null;
-}
-
-export interface HierarchyTopic {
-  id: string;
-  name: string;
-  kind: string;
-  level: number;
-  summary: string;
-  summary_stale: boolean;
-  notes: HierarchyNote[];
-}
-
-export interface HierarchySubject {
+export interface Subject {
   id: string;
   name: string;
   is_unfiled: boolean;
-  level: number;
-  topics: HierarchyTopic[];
+  topic_count: number;
 }
 
-export interface HierarchyOverview {
-  subject_count: number;
-  topic_count: number;
+export interface GraphTopic {
+  id: string;
+  name: string;
+  kind: string;
+  /** True for a cross-disciplinary topic the LLM recommended (NexaNota
+   * 4.3.2) rather than one extracted from a note's own text. */
+  is_recommended: boolean;
   note_count: number;
-  notes_by_type: Record<string, number>;
+}
+
+export interface GraphEdge {
+  topic_a_id: string;
+  topic_b_id: string;
+  /** What the LLM says connects the two topics; empty for a co-occurrence
+   * edge (same note, no LLM call). */
+  label: string;
+  confidence: number;
+  method: "llm" | "co-occurrence" | string;
+}
+
+export interface SubjectGraph {
+  subject_id: string;
+  subject_name: string;
+  topics: GraphTopic[];
+  edges: GraphEdge[];
+  /** Screen-reader narration of the graph as a whole. */
   spoken: string;
 }
 
-export interface Outline {
-  overview: HierarchyOverview;
-  subjects: HierarchySubject[];
+// --- note content (NexaNota 4.3.3: Note-Taking / Link / Edit areas) --------
+
+export interface NoteContent {
+  note_id: string;
+  /** Note-Taking Area. */
+  definition: string;
+  example_analysis: string;
+  summary: string;
+  /** Edit Area: the student's own markdown. */
+  edit_markdown: string;
+  /** Once true, regenerating a note's content never overwrites edit_markdown. */
+  edited_by_user: boolean;
+  method: "llm" | "extractive" | string;
+}
+
+export interface WebResource {
+  title: string;
+  resource_type: "paper" | "blog" | string;
+  search_query: string | null;
+  /** Always null today - a suggestion, never a URL presented as verified.
+   * See app/graph/web_resources.py on the backend. */
+  url: string | null;
+  verified: boolean;
+}
+
+export interface WebResourceList {
+  resources: WebResource[];
+}
+
+export interface ReplaySegment {
+  start: number;
+  end: number;
+  text: string;
+  label: string;
 }
 
 

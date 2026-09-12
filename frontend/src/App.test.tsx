@@ -66,9 +66,35 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: "EchoNotes", level: 1 }),
     ).toBeDefined();
-    for (const name of ["Status", "Capture", "Ask your notes"]) {
+    for (const name of [
+      "Status",
+      "Capture",
+      "Ask your notes",
+      "Knowledge graph",
+      "Notes (0)",
+      "Reminders (0)",
+    ]) {
       expect(screen.getByRole("heading", { name, level: 2 })).toBeDefined();
     }
+  });
+
+  it("shows the knowledge graph's subjects, empty or not", async () => {
+    // NexaNota redesign: replaces the old Subject/Topic/Note hierarchy tree.
+    const SUBJECTS = [{ id: "s1", name: "Operating Systems", is_unfiled: false, topic_count: 2 }];
+    stubFetch((url) => {
+      if (url.includes("/health")) return HEALTH;
+      if (url.includes("/capture/sources")) return SOURCES;
+      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
+      if (url.includes("/graph/subjects")) return SUBJECTS;
+      return [];
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Operating Systems/)).toBeDefined();
+    });
+    expect(screen.getByText(/2 topics/)).toBeDefined();
   });
 
   it("shows backend status once health resolves", async () => {

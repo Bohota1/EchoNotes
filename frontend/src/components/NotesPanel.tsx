@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useAnnouncer } from "@/a11y/Announcer";
 import { describeNoteForSpeech } from "@/a11y/speech";
+import { NoteContentView } from "@/components/NoteContentView";
+import { ReplayPanel } from "@/components/ReplayPanel";
 import { SpeakButton } from "@/components/SpeakButton";
 import { deleteNote, errorMessage, getNote, listNotes } from "@/api/client";
 import type { CaptureResponse, NoteSummary } from "@/types";
@@ -33,6 +35,7 @@ export function NotesPanel({ refreshKey }: Props) {
   const [detail, setDetail] = useState<CaptureResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [replayOpenId, setReplayOpenId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -56,6 +59,7 @@ export function NotesPanel({ refreshKey }: Props) {
       if (expandedId === noteId) {
         setExpandedId(null);
         setDetail(null);
+        setReplayOpenId(null);
         return;
       }
       try {
@@ -162,6 +166,24 @@ export function NotesPanel({ refreshKey }: Props) {
                     <p className="muted">
                       This note has no understanding result.
                     </p>
+                  )}
+
+                  <NoteContentView noteId={note.note_id} />
+
+                  <button
+                    type="button"
+                    className="small-button"
+                    aria-expanded={replayOpenId === note.note_id}
+                    onClick={() =>
+                      setReplayOpenId((current) =>
+                        current === note.note_id ? null : note.note_id,
+                      )
+                    }
+                  >
+                    {replayOpenId === note.note_id ? "Hide replay" : "Show replay"}
+                  </button>
+                  {replayOpenId === note.note_id && (
+                    <ReplayPanel noteId={note.note_id} />
                   )}
                 </div>
               )}

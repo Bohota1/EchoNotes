@@ -59,13 +59,14 @@ dateparser>=1.2.0
 # Only used as a fallback when rule-based extraction is low confidence.
 # The pipeline runs fully offline when no API key is configured.
 anthropic>=0.40.0
+# Free provider option (no credit card) - see GROQ_API_KEY in .env.example.
+groq>=0.11.0
 
 # ---- Optional: real microphone capture ----
 # Not required. DummyCaptureSource and every test run without it.
-# Install only if you want MicrophoneCaptureSource to work:
-#   pip install sounddevice soundfile
-# sounddevice>=0.5.0
-# soundfile>=0.12.1
+# Needed for MicrophoneCaptureSource (the "My microphone" option) to work:
+sounddevice>=0.5.0
+soundfile>=0.12.1
 
 # ---- Dev / test ----
 pytest>=8.3.0

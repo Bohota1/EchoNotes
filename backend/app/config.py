@@ -33,31 +33,83 @@ class Settings(BaseSettings):
     #   upload     - audio supplied by the caller
     capture_source: str = "dummy"
     dummy_audio_path: Path = BASE_DIR / "data" / "fixtures" / "sample_capture.wav"
-    # How long a live recording runs when the caller does not say. This is the
-    # actual recording length, not a ceiling - `max_capture_seconds` below is
-    # the ceiling. They were the same setting once, which meant every
-    # microphone capture blocked for five minutes.
-    default_capture_seconds: int = 15
     max_capture_seconds: int = 300
-    # Frames PortAudio hands the capture callback at a time. Larger blocks give
-    # the callback more headroom before input is dropped; 0 lets PortAudio
-    # choose, which on Windows can be small enough to drop audio under load.
-    capture_blocksize: int = 4096
+    # Fixed-length fallback used only by `MicrophoneCaptureSource.capture()`
+    # (a single record-for-N-seconds capture, e.g. a hardware trigger button)
+    # when no caller-supplied length is given. The Start/Stop flow the frontend
+    # actually uses (`app/capture/live.py`) ignores this entirely.
+    default_capture_seconds: int = 10
+    # `sounddevice.InputStream(blocksize=...)`: frames per audio callback. Was
+    # never defined even though `live.py` already read it, so every live
+    # (Start/Stop) recording failed with "'Settings' object has no attribute
+    # 'capture_blocksize'" before the stream could even open. 8000 frames is
+    # 0.5s at the 16 kHz capture rate - large enough to give the callback the
+    # headroom described in `live.py`'s docstring without adding noticeable
+    # start/stop latency.
+    capture_blocksize: int = 8000
 
-    # ---- LNT audio pipeline (paper Section 3.3) ----
-    # Loudness every recording is normalised to before chunking.
-    audio_target_dbfs: float = -20.0
+    # ---- LNT audio pipeline (Phase 1, paper Section 3.3) ----
+    # Normalisation target and the silence-based chunking `app/audio/chunking.py`
+    # and `app/audio/normalization.py` need. This block was missing entirely
+    # (both modules already read `get_settings().<name>` for every value here,
+    # so without it every real call - and every `tests/test_lnt_audio.py`
+    # chunking test - raised AttributeError; fixed alongside the NexaNota
+    # redesign since it surfaced while verifying that work, not because it is
+    # part of it).
+    #
+    # Where a normalised recording and its silence-based chunks are written.
     audio_processed_dir: Path = BASE_DIR / "data" / "audio_processed"
-    # Silence threshold. The offset is taken relative to the recording's own
-    # loudness, which is what makes one setting work across recording levels;
-    # `silence_thresh_dbfs` is the absolute fallback.
-    silence_thresh_offset_db: float = -16.0
-    silence_thresh_dbfs: int = -40
+    # Loudness `normalize_segment`/`normalize` bring a recording to (dBFS).
+    audio_target_dbfs: float = -20.0
+    # A pause must be at least this long to count as a chunk boundary.
     min_silence_len_ms: int = 400
-    chunk_keep_silence_ms: int = 200
-    # Chunks outside this range are split or dropped.
-    min_chunk_ms: int = 250
-    max_chunk_ms: int = 30_000
+    # How much of the surrounding silence to keep on each side of a chunk, so
+    # a word right at the edge of a pause is not clipped.
+    chunk_keep_silence_ms: int = 150
+    # The default silence cut-off is relative: `segment.dBFS + this offset`,
+    # so the same recording chunks the same way whether it is a quiet phone
+    # capture or a loud lecture hall (see `split_segment_on_silence`,
+    # `relative_threshold`). -16 dB below the recording's own average is the
+    # standard pydub silence-detection heuristic.
+    silence_thresh_offset_db: float = -16.0
+    # Absolute fallback threshold, used only when a relative one cannot be
+    # computed (a fully-silent segment, whose dBFS is -inf).
+    silence_thresh_dbfs: int = -40
+    # A speaker who never pauses produces one very long chunk; anything past
+    # this is cut at its quietest point instead of left as one slow-to-transcribe
+    # blob (`_enforce_max_length`).
+    max_chunk_ms: int = 60_000
+    # Fragments shorter than this (a breath, a click) are dropped rather than
+    # sent to the recogniser as their own "sentence".
+    min_chunk_ms: int = 200
+
+    # ---- LNT NLP tasks (Phase 1, paper Section 3.4) ----
+    # Same story as the audio-pipeline block above: `app/nlp/embeddings_w2v.py`,
+    # `app/nlp/thematic.py` and `app/nlp/topic_modeling.py` already read every
+    # value below through `get_settings()`; this section was simply never
+    # added, so real calls (and most of `tests/test_lnt_nlp.py`) raised
+    # AttributeError. Added alongside the NexaNota redesign since it surfaced
+    # while verifying that work, not because it is part of it.
+    #
+    # Word2Vec (3.4.3). "cbow" or "skipgram" - both are always available by
+    # name; this only picks the one used when a caller does not choose.
+    word2vec_algorithm: str = "cbow"
+    word2vec_vector_size: int = 100
+    word2vec_window: int = 5
+    # A single lecture is a very small corpus (see embeddings_w2v.py's module
+    # docstring) - gensim's own default of 5 would drop nearly every word in
+    # a short capture, so every word that appears at all counts.
+    word2vec_min_count: int = 1
+    word2vec_epochs: int = 30
+    # Collocations/bigrams (3.4.6, 4.1): how many pairs to return, and the
+    # window `BigramCollocationFinder` looks across for a pairing.
+    thematic_top_n: int = 10
+    collocation_window: int = 2
+    # LDA (3.4.7). Section 5.1's sample lecture: 1947 words -> 9 themes, ~55
+    # topics - 9 is where the topic-count default comes from.
+    lda_num_topics: int = 9
+    lda_max_iter: int = 50
+    lda_top_terms: int = 10
 
     # ---- Speech to text (Phase 1) ----
     asr_backend: str = "faster_whisper"
@@ -67,68 +119,57 @@ class Settings(BaseSettings):
     whisper_language: str | None = None  # None -> auto-detect
     whisper_beam_size: int = 5
     whisper_vad_filter: bool = True
-    # Below this confidence a detected language is treated as unknown rather
-    # than acted on. Detection on a few seconds of accented speech is noisy,
-    # and a wrong guess flips transcription into translation, which rewrites
-    # the note instead of recording it.
-    language_detection_floor: float = 0.60
 
-    # Vocabulary hint passed to Whisper. Whisper strongly prefers words it has
-    # been primed with, which is the fix for domain terms it otherwise mangles
-    # ("deque" -> "DQ", "linked list" -> "lengthless"). Keep it short: a long
-    # prompt starts to bias the transcript rather than just its vocabulary.
-    whisper_initial_prompt: str = ""
-
-    # Carry the tail of the previous chunk forward as context. The paper's
-    # Section 3.3 chunking splits on silence and recognises each chunk alone,
-    # which suited an API that had no cross-clip context anyway. Whisper does
-    # have context and depends on it, so a chunk containing only "like" is
-    # transcribed as the sentence "Like." Passing recent text forward restores
-    # what the split removed.
-    whisper_carry_context: bool = True
-
-    # Whether to chunk at all before recognising. True follows the paper.
-    # False sends the whole recording to Whisper in one pass, which is more
-    # accurate because nothing interrupts its context window - at the cost of
-    # departing from Section 3.3.
-    whisper_chunk_audio: bool = True
-    # Which transcription pipeline to run:
-    #   lnt    - the paper's Section 3.3 route: normalise -> split on silence ->
-    #            recognise each chunk -> append "." -> join
-    #   direct - hand the whole file to Whisper in one go
+    # `app/asr/transcriber.py::get_transcriber()` already read every setting
+    # below to choose and run a transcriber, but none of them were ever
+    # defined here - so the very first real transcription (dummy or
+    # microphone; the test suite injects a fake transcriber and never hits
+    # this) raised AttributeError on `get_settings().asr_pipeline` before a
+    # single word was recognised, surfacing to the user as a bare Internal
+    # Server Error. Left out of the earlier settings pass because this file
+    # is the "don't touch speech-to-text" zone - these are declarations the
+    # code already depends on, not a logic change.
+    #
+    # "direct" hands Whisper the whole recording in one call. Anything else
+    # (the default) runs the paper's own route in `LNTTranscriber`: normalise
+    # -> split on silence -> recognise each chunk -> join - see the module
+    # comment above `LNTTranscriber` for why that costs more time but is worth
+    # it (known loudness, real sentence boundaries, per-chunk confidence).
     asr_pipeline: str = "lnt"
-    # The paper standardises every language to English before analysis
-    # (Section 3.2). Whisper does this itself with its translate task, so no
-    # external translation service is involved.
-    translate_to_english: bool = True
-
-    # ---- LNT NLP tasks (paper Section 3.4) ----
-    # 3.4.3 Word2Vec: "cbow" or "skipgram" (the paper implements both)
-    word2vec_algorithm: str = "cbow"
-    word2vec_vector_size: int = 100
-    word2vec_window: int = 5
-    word2vec_min_count: int = 1
-    word2vec_epochs: int = 30
-    # 3.4.5 Summarization: the paper prints "the first K sentences of ranking".
-    summary_top_k: int = 5
-    # Fraction of sentences to keep when K is not given explicitly.
-    summary_ratio: float = 0.35
-    # 3.4.6 Thematic analysis: hapaxes, collocations, bigrams
-    thematic_top_n: int = 20
-    collocation_window: int = 2
-    # 3.4.7 Topic modelling with LDA
-    lda_num_topics: int = 9
-    lda_max_iter: int = 20
-    lda_top_terms: int = 10
+    # Only used by the "lnt" pipeline, and only when `whisper_language` is not
+    # set, so detection actually runs. Below this confidence, a detected
+    # language is discarded and the audio is transcribed as-is rather than
+    # risking a wrong-language guess silently flipping `task` to "translate".
+    language_detection_floor: float = 0.5
+    # Whisper already standardises non-English speech to English when asked;
+    # off by default so a note keeps the language it was actually spoken in
+    # unless this is deliberately turned on.
+    translate_to_english: bool = False
+    # The paper's Section 3.3 silence-based chunking (see `LNTTranscriber`).
+    # False falls back to one whole-file pass, which reads better as prose but
+    # loses the per-chunk confidence and real sentence boundaries.
+    whisper_chunk_audio: bool = True
+    # Domain vocabulary Whisper is primed with on every chunk (e.g. course
+    # jargon it would otherwise mishear as a common soundalike - "deque" as
+    # "DQ"). Empty by default: this is a per-deployment hint, not something
+    # with a sensible universal value.
+    whisper_initial_prompt: str | None = None
+    # Carries the tail of the previous chunk's text into the next chunk's
+    # prompt, so a fragment like "like" is not transcribed as the standalone
+    # sentence "Like." - see `LNTTranscriber._prompt_for_chunk`.
+    whisper_carry_context: bool = True
 
     # ---- LLM abstraction (Phase 2) ----
     # The pipeline works with no key at all: rules run first and the LLM is
     # consulted only when a rule result is below its confidence floor.
-    llm_provider: str = "anthropic"  # anthropic | null
+    # `groq` is the free option - no credit card, a free key from
+    # console.groq.com (see GROQ_API_KEY below).
+    llm_provider: str = "anthropic"  # anthropic | groq | null
     llm_model: str = "claude-opus-5"
     llm_max_tokens: int = 1024
     llm_timeout_seconds: float = 30.0
     anthropic_api_key: str = ""
+    groq_api_key: str = ""
 
     # ---- Understanding (Phase 2) ----
     # Below these confidences the rule result is treated as unreliable and the
@@ -230,6 +271,8 @@ class Settings(BaseSettings):
         """True when a real LLM provider can actually be reached."""
         if self.llm_provider == "anthropic":
             return bool(self.anthropic_api_key)
+        if self.llm_provider == "groq":
+            return bool(self.groq_api_key)
         return False
 
     def weights_ok(self) -> bool:

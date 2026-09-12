@@ -106,9 +106,18 @@ def create_topic(db, subject_id: str, name: str, kind: str = "topic"):
 
 
 def move_note(db, note_id: str, target_topic_id: str):
-    """Idea11y Section 4.2: re-file a note by target topic id (the outline's
-    drop-down of current clusters). Marks both the old and new topic's
-    summary stale, since moving a note changes what both clusters are about."""
+    """Re-file a note by target topic id (the outline's drop-down of current
+    clusters / the "move this note to X" voice command).
+
+    NexaNota redesign note: this only re-points `Note.topic_id`, the
+    "primary" topic kept for backward compatibility (see
+    `app.db.models.Note.topic_id`). It intentionally does NOT touch
+    `NoteTopic` (the note's full set of LLM-extracted topics) or
+    `TopicConnection` - a manual move changes where a note is primarily
+    filed, not what the note is actually about, so the graph the note
+    already contributed to is left alone. There is no more "topic summary"
+    to mark stale (`Topic.summary`/`summary_stale` were removed with the old
+    per-topic-summary design - see `app.graph.note_generator` instead)."""
     from app.db.repositories import NoteRepository, TopicRepository
 
     note_repo = NoteRepository(db)
@@ -121,11 +130,7 @@ def move_note(db, note_id: str, target_topic_id: str):
     if target is None:
         raise LookupError(f"no topic {target_topic_id}")
 
-    old_topic_id = note.topic_id
     note_repo.move_to_topic(note_id, target_topic_id)
-    if old_topic_id and old_topic_id != target_topic_id:
-        topic_repo.mark_stale(old_topic_id)
-    topic_repo.mark_stale(target_topic_id)
 
     # Phase 4 (Team Member 3): the vector index stores each note's subject and
     # topic so retrieval can filter on them. A move makes that copy stale, and
