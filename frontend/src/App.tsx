@@ -3,8 +3,8 @@
  *
  * Regions, in the order a screen reader user meets them:
  *
- *   1. Capture        record a note and see what came back
- *   2. Ask            question your notes (retrieval)
+ *   1. Voice          the three keys: record, converse, ask - all spoken
+ *   2. Ask            the same question path, typed, for sighted use
  *   3. Knowledge graph the topics notes were organized into, and how they
  *                      connect (NexaNota redesign, replacing the old
  *                      Subject/Topic/Note hierarchy outline)
@@ -21,7 +21,6 @@ import { useCallback, useState } from "react";
 import { AnnouncerProvider } from "@/a11y/Announcer";
 import { ErrorBoundary } from "@/a11y/ErrorBoundary";
 import { AskPanel } from "@/components/AskPanel";
-import { CapturePanel } from "@/components/CapturePanel";
 import { GraphPanel } from "@/components/GraphPanel";
 import { NotesPanel } from "@/components/NotesPanel";
 import { RemindersPanel } from "@/components/RemindersPanel";
@@ -76,14 +75,13 @@ function Dashboard() {
           )}
         </section>
 
-        {/* The voice console, first on the page: Space records a note,
-            Shift opens a conversation, Enter asks a question, and every
-            result is spoken. Everything below is the same functionality for
-            sighted use - kept, because "accessible" should not mean "a worse
-            version for everyone else". */}
-        <VoiceConsole onNoteCaptured={onCaptured} />
-
-        <CapturePanel onCaptured={onCaptured} autoSpeak={autoSpeak} />
+        {/* The voice console: Space records a note, Shift opens a
+            conversation, Enter asks a question, and every result is spoken.
+            It owns those keys alone - the old Capture panel bound Space on
+            the window too, so one press reached both. The panels below are
+            the same functionality for sighted use, kept because "accessible"
+            should not mean "a worse version for everyone else". */}
+        <VoiceConsole onNoteCaptured={onCaptured} autoSpeak={autoSpeak} />
 
         <AskPanel />
 
