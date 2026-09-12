@@ -51,6 +51,30 @@ Rules you must not break:
 - Be brief: under 45 words unless the question genuinely needs more.
 - Plain sentences only. No markdown, no bullet points, no headings."""
 
+#: Appended to the system prompt only inside a conversation. The history exists
+#: so the reply reads as a continuation - it is NOT a source. Every fact still
+#: has to come from the numbered notes, or the second answer in a conversation
+#: could quietly be built on the first one's wording rather than on any note.
+CONVERSATION_RULES = """
+
+You are mid-conversation. Earlier questions and answers are given for context.
+- Do not repeat what you already said; answer what was just asked.
+- The conversation is context only. Facts still come ONLY from the numbered
+  notes below - never from an earlier answer, and never from outside knowledge.
+- If the notes do not answer the new question, say so, even if you answered the
+  previous one."""
+
+CONVERSATION_PROMPT = """\
+Conversation so far:
+{history}
+
+New question: {question}
+
+Notes:
+{context}
+
+Answer the new question using only these notes."""
+
 ANSWER_PROMPT = """\
 Question: {question}
 
@@ -220,8 +244,13 @@ def answer(
     question: str,
     result: RetrievalResult,
     intent: Intent = Intent.ASK,
+    history: str = "",
 ) -> GroundedAnswer:
-    """Produce a grounded answer for a question over retrieved notes."""
+    """Produce a grounded answer for a question over retrieved notes.
+
+    `history` is the conversation so far, when the question was asked inside
+    a session. It changes how the answer *reads*, never what it may assert.
+    """
     if result.is_empty:
         return _empty_answer(intent, result)
 
@@ -245,6 +274,14 @@ def answer(
                 response = client.complete(
                     SUMMARY_PROMPT.format(scope=scope, context=context),
                     system=SUMMARY_SYSTEM.format(max_words=max_words),
+                    max_tokens=settings.rag_answer_max_tokens,
+                )
+            elif history:
+                response = client.complete(
+                    CONVERSATION_PROMPT.format(
+                        history=history, question=question, context=context
+                    ),
+                    system=ANSWER_SYSTEM + CONVERSATION_RULES,
                     max_tokens=settings.rag_answer_max_tokens,
                 )
             else:
@@ -278,12 +315,22 @@ def answer(
 def to_spoken(text: str, result: RetrievalResult) -> str:
     """Convert an answer into something worth hearing.
 
-    Bracketed citations are read out as "bracket one" by screen readers, so they
-    are replaced with a single spoken provenance clause at the end. One clause,
-    not one per note: naming four sources aloud buries the answer.
+    Bracketed citations always go: a screen reader reads "[1]" aloud as "bracket
+    one", which is noise in the middle of a sentence.
+
+    Whether to say where the answer came from is a judgement call, and it is off
+    by default. The argument for it is real - someone who cannot see the source
+    list has no other way to know - but the clause it produces is vague where it
+    matters most ("and 1 other place" names nothing) and it lands after every
+    single answer, which is a lot of repetition for a little provenance. The
+    sources are still returned in full on the response for any client that wants
+    to show or speak them. Set `SPEAK_ANSWER_PROVENANCE=true` to restore it.
     """
     spoken = re.sub(r"\s*\[\d+\]", "", text).strip()
     spoken = re.sub(r"\s{2,}", " ", spoken)
+
+    if not get_settings().speak_answer_provenance:
+        return spoken
 
     if not result.notes:
         return spoken
