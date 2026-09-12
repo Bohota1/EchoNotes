@@ -426,15 +426,35 @@ class TestAnswering:
         assert "[1]" in grounded.text
 
     def test_spoken_form_strips_bracket_citations(self, db_session, make_note):
-        """A screen reader reads "[1]" as "bracket one". Provenance belongs in
-        a spoken clause instead."""
+        """A screen reader reads "[1]" aloud as "bracket one" - noise in the
+        middle of a sentence."""
         from app.rag.answerer import answer
 
         make_note(OS_NOTE)
         result = retrieve(db_session, "circular wait")
         grounded = answer("What does deadlock require?", result)
         assert "[1]" not in grounded.spoken
-        assert "From" in grounded.spoken
+        assert grounded.spoken.strip()
+
+    def test_provenance_is_not_spoken_by_default(self, db_session, make_note):
+        """The clause is vague where it matters ("and 1 other place" names
+        nothing) and repeats after every answer. The sources are still on the
+        response for any client that wants them."""
+        from app.rag.answerer import answer
+
+        make_note(OS_NOTE)
+        grounded = answer("What does deadlock require?", retrieve(db_session, "circular wait"))
+        assert "From " not in grounded.spoken
+        assert grounded.sources, "sources are still returned, just not spoken"
+
+    def test_provenance_can_be_turned_back_on(self, db_session, make_note, monkeypatch):
+        from app.config import get_settings
+        from app.rag.answerer import answer
+
+        monkeypatch.setattr(get_settings(), "speak_answer_provenance", True, raising=False)
+        make_note(OS_NOTE)
+        grounded = answer("What does deadlock require?", retrieve(db_session, "circular wait"))
+        assert "From " in grounded.spoken
 
     def test_confidence_tracks_retrieval_strength(self, db_session, make_note):
         from app.rag.answerer import answer
