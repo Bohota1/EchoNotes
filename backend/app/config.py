@@ -334,6 +334,20 @@ class Settings(BaseSettings):
     # wants to show or speak them - this only controls the spoken sentence.
     speak_answer_provenance: bool = False
 
+    # ---- Reading notes back verbatim ----
+    # Re-recording the same explanation is normal: the user says it again
+    # because the first attempt was misheard, or because they are revising. It
+    # leaves several notes whose wording is nearly the same, and reading all of
+    # them aloud sounds exactly like reading one note twice - which is what it
+    # was reported as.
+    #
+    # Measured on a real library, word-sequence similarity separates the two
+    # cases cleanly: unrelated notes scored 0.13, a fuller re-recording of the
+    # same explanation 0.47-0.50, and near-identical retakes 0.73-0.89. 0.6
+    # sits in the gap with room on both sides.
+    read_aloud_collapse_repeats: bool = True
+    read_aloud_repeat_threshold: float = 0.6
+
     # ---- Conversation sessions (Shift opens one, Enter asks inside it) ----
     # A follow-up is rewritten into a standalone question before retrieval.
     # Embedding "how does it relate to system design" searches for "it relate",
