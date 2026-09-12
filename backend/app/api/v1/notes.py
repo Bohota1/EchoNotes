@@ -80,6 +80,15 @@ def delete_note(note_id: str, db: Session = Depends(get_db)) -> Response:
     from app.rag.indexer import remove_note
 
     remove_note(note_id)
+
+    # The note's own rows cascade; the containers it pointed at do not. A topic
+    # is shared, so it cannot cascade - but nothing else ever removes one that
+    # has been emptied, so every delete used to leave an empty topic, an empty
+    # subject above it and a contact mentioned in nothing. Pruned here, inside
+    # the same transaction as the delete that orphaned them.
+    from app.db.cleanup import prune_orphans_safe
+
+    prune_orphans_safe(db)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
