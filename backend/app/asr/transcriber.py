@@ -339,12 +339,25 @@ class LNTTranscriber(Transcriber):
         model = self._load_model()
 
         # --- 1. normalise (Section 3.3) ------------------------------------
-        try:
-            normalized = normalize(audio_path)
-        except Exception as exc:  # noqa: BLE001
-            # Losing normalisation degrades chunking; losing the capture does
-            # not have to follow.
-            logger.warning("normalisation failed (%s); using the raw audio", exc)
+        # Only when chunking will actually run. Normalisation exists to serve
+        # chunking: it puts every recording at a known loudness so the silence
+        # threshold in `app.audio.chunking` means the same thing for a quiet
+        # phone recording and a loud lecture hall. With chunking off there is
+        # no threshold to calibrate, and it is not free - it gains the audio,
+        # attenuates anything above the median, then gains it again, which is
+        # a compressor. Measured on a real capture, the same model and settings
+        # gave "the system still works" on the raw audio and "the system
+        # steelworks" on the normalised one, reproducibly: flattening the
+        # dynamics removes what Whisper uses to separate near-homophones.
+        if settings.whisper_chunk_audio:
+            try:
+                normalized = normalize(audio_path)
+            except Exception as exc:  # noqa: BLE001
+                # Losing normalisation degrades chunking; losing the capture
+                # does not have to follow.
+                logger.warning("normalisation failed (%s); using the raw audio", exc)
+                normalized = audio_path
+        else:
             normalized = audio_path
 
         # --- 2. detect the language (Section 3.2) --------------------------
