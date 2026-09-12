@@ -4,20 +4,14 @@
  * cross-disciplinary becomes a node, and every LLM- or co-occurrence-found
  * link between two topics becomes an edge.
  *
- * NexaNota's own paper renders this as a node-and-edge diagram (paper
- * section D3 / 4.3.2). This app's primary users are blind or low-vision, so
- * that can't be the ONLY view: the default here is cluster view - real
- * headings (`h3` for a subject/course, `h4` for a topic), a plain-language
- * "connects to" list under each topic, and topics grouped into their
- * connected components (see `ClusterGraph.tsx`) - all walkable with heading
- * navigation (H / Shift+H in NVDA and JAWS) instead of a canvas only a mouse
- * can read.
- *
- * A "View" toggle lets a sighted user switch that same data to a genuinely
- * visual diagram instead - clickable nodes, drawn edges - matching
- * NexaNota's own picture of the graph (see `VisualGraph.tsx`). That diagram
- * is additive: cluster view is the default and is never removed or degraded
- * by the diagram existing alongside it.
+ * This app's primary users are blind or low-vision, so the graph is rendered
+ * as cluster view: real headings (`h3` for a subject/course, `h4` for a
+ * topic), a plain-language "connects to" list under each topic, and topics
+ * grouped into their connected components (see `ClusterGraph.tsx`) - all
+ * walkable with heading navigation (H / Shift+H in NVDA and JAWS) instead of
+ * a canvas only a mouse can read. There is no separate visual diagram mode;
+ * this is the only view, so it is never a second-class option next to a
+ * sighted-first one.
  *
  * Three levels of on-demand loading, mirroring the old panel's topic
  * disclosure pattern: the subject list loads up front (cheap - counts only),
@@ -36,10 +30,7 @@ import {
 } from "@/api/client";
 import { ClusterGraph } from "@/components/ClusterGraph";
 import { SpeakButton } from "@/components/SpeakButton";
-import { VisualGraph } from "@/components/VisualGraph";
 import type { GraphEdge, GraphTopic, NoteSummary, Subject, SubjectGraph } from "@/types";
-
-type ViewMode = "diagram" | "cluster";
 
 /** The other topics `topic` connects to, as "name (why)" pairs, resolved
  * against the subject's own topic list so an edge's two ids become names a
@@ -88,8 +79,6 @@ interface Props {
 
 export function GraphPanel({ refreshKey }: Props) {
   const { announce } = useAnnouncer();
-
-  const [viewMode, setViewMode] = useState<ViewMode>("cluster");
 
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [subjectsError, setSubjectsError] = useState<string | null>(null);
@@ -182,10 +171,8 @@ export function GraphPanel({ refreshKey }: Props) {
     [announce, openTopics, topicNotes],
   );
 
-  /** The notes/loading/error block shown once a topic is expanded - shared
-   * between cluster view's per-topic block and the diagram's per-topic
-   * detail panel, so opening a topic behaves identically no matter which
-   * view found it. */
+  /** The notes/loading/error block shown once a topic is expanded, from
+   * cluster view's per-topic block. */
   function topicDetails(topic: GraphTopic, speech: string) {
     const notes = topicNotes[topic.id];
     return (
@@ -221,40 +208,17 @@ export function GraphPanel({ refreshKey }: Props) {
       <h2 id="graph-heading">Knowledge graph</h2>
 
       <div className="view-toggle" role="group" aria-label="Graph view">
-        <button
-          type="button"
-          className={viewMode === "cluster" ? "primary" : ""}
-          aria-pressed={viewMode === "cluster"}
-          onClick={() => setViewMode("cluster")}
-        >
+        <button type="button" className="primary" aria-pressed="true">
           Cluster view
         </button>
-        <button
-          type="button"
-          className={viewMode === "diagram" ? "primary" : ""}
-          aria-pressed={viewMode === "diagram"}
-          onClick={() => setViewMode("diagram")}
-        >
-          Diagram view
-        </button>
       </div>
-      {viewMode === "diagram" && (
-        <p className="hint">
-          Diagram view draws topics as nodes and their connections as lines, like
-          NexaNota's own graph. It's a visual summary of the same data as
-          cluster view - screen reader users will generally want cluster view
-          instead.
-        </p>
-      )}
-      {viewMode === "cluster" && (
-        <p className="hint">
-          Cluster view groups topics into clusters of everything connected to
-          each other, directly or through another topic - Deadlock, Mutual
-          Exclusion and Process might all land in the same cluster because
-          each connects to the next one along. A topic with no connections
-          gets a cluster of its own.
-        </p>
-      )}
+      <p className="hint">
+        Cluster view groups topics into clusters of everything connected to
+        each other, directly or through another topic - Deadlock, Mutual
+        Exclusion and Process might all land in the same cluster because
+        each connects to the next one along. A topic with no connections
+        gets a cluster of its own.
+      </p>
 
       {subjectsError && (
         <p role="alert" className="error">
@@ -276,13 +240,12 @@ export function GraphPanel({ refreshKey }: Props) {
         const graph = graphs[subject.id];
         const topicsById = new Map((graph?.topics ?? []).map((t) => [t.id, t]));
 
-        // Cluster view's per-topic block (heading, "connects to" summary,
-        // disclosure) - pulled out here rather than defined inline in
-        // ClusterGraph's render prop only because it needs `graph` and
-        // `topicsById`, both scoped to this subject. Only ever called once
-        // `graph` is known to exist (the only call site is inside
-        // `isOpen && graph && (...)`), so this closure captures it narrowed
-        // to `SubjectGraph`.
+        // One topic's block (heading, "connects to" summary, disclosure) -
+        // pulled out here rather than defined inline in ClusterGraph's
+        // render prop only because it needs `graph` and `topicsById`, both
+        // scoped to this subject. Only ever called once `graph` is known to
+        // exist (the only call site is inside `isOpen && graph && (...)`),
+        // so this closure captures it narrowed to `SubjectGraph`.
         const renderTopicRow = graph
           ? (topic: GraphTopic) => {
               const connections = connectionsFor(topic, graph.edges, topicsById);
@@ -364,56 +327,7 @@ export function GraphPanel({ refreshKey }: Props) {
                   <p className="muted small">No topics under this subject yet.</p>
                 )}
 
-                {viewMode === "diagram" && graph.topics.length > 0 && (
-                  <>
-                    <VisualGraph
-                      topics={graph.topics}
-                      edges={graph.edges}
-                      openTopicId={
-                        graph.topics.find((t) => openTopics[t.id])?.id ?? null
-                      }
-                      onSelectTopic={(topic) => {
-                        const connections = connectionsFor(topic, graph.edges, topicsById);
-                        const speech = topicSpeech(topic, connections, topicNotes[topic.id]);
-                        void toggleTopic(topic, speech);
-                      }}
-                    />
-
-                    {graph.topics
-                      .filter((topic) => openTopics[topic.id])
-                      .map((topic) => {
-                        const connections = connectionsFor(topic, graph.edges, topicsById);
-                        const speech = topicSpeech(topic, connections, topicNotes[topic.id]);
-                        return (
-                          <div key={topic.id} className="topic diagram-topic-detail">
-                            <h4>
-                              {topic.name}
-                              <span className="muted small">
-                                {" "}
-                                ({topic.note_count} note
-                                {topic.note_count === 1 ? "" : "s"})
-                              </span>
-                              {topic.is_recommended && (
-                                <span className="badge badge-quiet"> suggested</span>
-                              )}
-                            </h4>
-                            {connections.length > 0 && (
-                              <p className="topic-summary">
-                                Connects to{" "}
-                                {connections
-                                  .map((c) => (c.label ? `${c.name} (${c.label})` : c.name))
-                                  .join(", ")}
-                                .
-                              </p>
-                            )}
-                            {topicDetails(topic, speech)}
-                          </div>
-                        );
-                      })}
-                  </>
-                )}
-
-                {viewMode === "cluster" && graph.topics.length > 0 && (
+                {graph.topics.length > 0 && (
                   <ClusterGraph
                     topics={graph.topics}
                     edges={graph.edges}
