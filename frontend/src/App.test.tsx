@@ -67,7 +67,6 @@ describe("App", () => {
       screen.getByRole("heading", { name: "EchoNotes", level: 1 }),
     ).toBeDefined();
     for (const name of [
-      "Status",
       "Capture",
       "Ask your notes",
       "Knowledge graph",
@@ -95,22 +94,6 @@ describe("App", () => {
       expect(screen.getByText(/Operating Systems/)).toBeDefined();
     });
     expect(screen.getByText(/2 topics/)).toBeDefined();
-  });
-
-  it("shows backend status once health resolves", async () => {
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      return [];
-    });
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/Backend: connected/)).toBeDefined();
-    });
-    expect(screen.getByText(/Speech model: base/)).toBeDefined();
   });
 
   it("has a live region so nothing changes silently", () => {
