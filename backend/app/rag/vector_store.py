@@ -1,12 +1,15 @@
 """Vector storage for retrieval (Phase 4).
 
-One interface, two backends, selected by `VECTOR_STORE`:
+One interface, three backends, selected by `VECTOR_STORE`:
 
-  ``chroma``  (default) - ChromaDB, persisted under `CHROMA_DIR`. Survives
-              restarts and does metadata filtering in the engine.
-  ``memory``  - brute-force cosine over numpy. No persistence, no dependency,
-              instant startup. What the test suite uses, and a working fallback
-              when ChromaDB is not installed.
+  ``chroma``   (default) - ChromaDB, persisted under `CHROMA_DIR`. Survives
+               restarts and does metadata filtering in the engine.
+  ``pgvector`` - the same Postgres database the notes live in, via the pgvector
+               extension. One store to back up, and the whole team shares one
+               index. See `app/rag/pgvector_store.py`.
+  ``memory``   - brute-force cosine over numpy. No persistence, no dependency,
+               instant startup. What the test suite uses, and a working fallback
+               when the configured backend cannot be reached.
 
 Filtering is expressed as a `RetrievalFilter`, not as a raw backend query. That
 matters: "what did I write about databases *last week*" has to be a filter
@@ -387,6 +390,36 @@ def _build_store() -> VectorStore:
 
     if backend == "memory":
         return InMemoryVectorStore()
+
+    if backend == "pgvector":
+        # The vector index lives in the same Postgres database as the notes.
+        # Dimension has to match the configured embedding backend exactly - a
+        # column declared VECTOR(n) rejects anything else - so it is read from
+        # the provider rather than configured separately and allowed to drift.
+        from app.rag.embeddings import get_embedding_provider
+
+        if not settings.database_url.startswith("postgres"):
+            logger.error(
+                "VECTOR_STORE=pgvector needs DATABASE_URL to be Postgres, but it is %r; "
+                "falling back to the in-memory store",
+                settings.database_url.split("://")[0],
+            )
+            return InMemoryVectorStore()
+        try:
+            from app.rag.pgvector_store import PgVectorStore
+
+            return PgVectorStore(
+                settings.database_url, get_embedding_provider().dimension
+            )
+        except Exception:
+            # Same principle as every other optional backend: a database that
+            # cannot be reached degrades retrieval, it does not stop the app
+            # from starting or lose a note.
+            logger.exception(
+                "pgvector unavailable, falling back to the in-memory vector store; "
+                "the index will not survive a restart"
+            )
+            return InMemoryVectorStore()
 
     if backend == "chroma":
         try:
