@@ -57,6 +57,53 @@ class GroqLLMClient(LLMClient):
 
         self._sdk = groq
         self._client = groq.Groq(api_key=api_key, timeout=timeout)
+        self._token_param = self._detect_token_param()
+
+    def _detect_token_param(self) -> str:
+        """Which keyword this SDK version uses to cap the response length.
+
+        Groq renamed `max_tokens` to `max_completion_tokens` (following
+        OpenAI) partway through the 0.x line, and `requirements.txt` pins only
+        `groq>=0.11.0` - so different machines on the same team legitimately
+        have different versions installed. Hard-coding either name breaks for
+        somebody, silently: the TypeError is swallowed by the caller's
+        fallback, so every LLM call quietly degrades to the rule-based path
+        and nothing looks broken.
+
+        Asking the installed SDK what it accepts is the only version-proof
+        answer. Falls back to the older name, which is what `>=0.11.0` gets.
+        """
+        import inspect
+
+        try:
+            params = inspect.signature(
+                self._client.chat.completions.create
+            ).parameters
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return "max_tokens"
+
+        if "max_completion_tokens" in params:
+            return "max_completion_tokens"
+        return "max_tokens"
+
+    def _budget(self, max_tokens: int | None) -> int:
+        """The token cap to send, with headroom for a reasoning model.
+
+        A reasoning model spends output tokens thinking before it writes
+        anything visible, and that spend counts against the same cap. A caller
+        asking for 40 tokens of topic summary therefore gets an empty string -
+        the budget is exhausted before the summary begins, and because the
+        caller treats empty as "the LLM had nothing useful", it silently falls
+        back to the rule-based path and looks like it is working.
+
+        Callers size their budget for the text they want, which is the right
+        thing for them to reason about. This adds what the model needs to get
+        there. See `groq_reasoning_headroom`.
+        """
+        from app.config import get_settings
+
+        requested = max_tokens or self.default_max_tokens
+        return requested + max(0, get_settings().groq_reasoning_headroom)
 
     @property
     def available(self) -> bool:
@@ -84,8 +131,14 @@ class GroqLLMClient(LLMClient):
             response = self._client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_completion_tokens=max_tokens or self.default_max_tokens,
+                **{self._token_param: self._budget(max_tokens)},
             )
+        except TypeError as exc:
+            # The SDK rejected an argument. Without this branch it propagates
+            # as a bare TypeError, which callers do not treat as an LLM
+            # failure - so it escapes their fallback and looks like a crash
+            # rather than a degraded answer.
+            raise LLMError(f"the installed groq SDK rejected a parameter: {exc}") from exc
         except groq.AuthenticationError as exc:
             raise LLMUnavailableError(f"authentication failed: {exc}") from exc
         except groq.PermissionDeniedError as exc:
@@ -104,9 +157,22 @@ class GroqLLMClient(LLMClient):
 
         choice = response.choices[0]
         usage = getattr(response, "usage", None)
+        text = choice.message.content or ""
+
+        if not text.strip() and choice.finish_reason == "length":
+            # The model ran out of budget before producing visible text - on a
+            # reasoning model, that means reasoning consumed all of it. Raised
+            # rather than returned, because an empty string is indistinguishable
+            # from "the model had nothing to say": the caller falls back to
+            # rules either way, but only one of them says why in the log.
+            raise LLMError(
+                f"{self.model} produced no visible text within "
+                f"{self._budget(max_tokens)} tokens (reasoning consumed the "
+                f"budget). Raise GROQ_REASONING_HEADROOM."
+            )
 
         return LLMResponse(
-            text=choice.message.content or "",
+            text=text,
             model=response.model,
             provider=self.provider,
             input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
