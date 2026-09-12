@@ -32,6 +32,7 @@ from app.asr.transcriber import (
 from app.capture.sources import AudioCaptureSource, CapturedAudio, get_capture_source
 from app.db.models import CaptureSource, Note
 from app.db.repositories import NoteRepository
+from app.nlp.correction import correct_transcript_safe
 from app.nlp.preprocess import clean_transcript
 
 logger = logging.getLogger(__name__)
@@ -121,10 +122,18 @@ def run_capture(
         # the empty note plus a low confidence score says so honestly.
         logger.warning("capture %s produced an empty transcript", captured.capture_id)
 
-    # --- 3. clean ---------------------------------------------------------
-    cleaned = clean_transcript(transcription.text)
+    # --- 3. correct -------------------------------------------------------
+    # Whisper decides between candidates on sound plus a shallow language prior,
+    # so a near-homophone that is a real word wins when the audio is ambiguous
+    # ("the system still works" -> "the system steelworks"). An LLM reasons
+    # about meaning and repairs that. `raw_text` below stays the untouched
+    # recogniser output, so the original is always recoverable.
+    corrected = correct_transcript_safe(transcription.text)
 
-    # --- 4. store ---------------------------------------------------------
+    # --- 4. clean ---------------------------------------------------------
+    cleaned = clean_transcript(corrected)
+
+    # --- 5. store ---------------------------------------------------------
     note = persist_capture(
         db,
         captured=captured,
@@ -134,11 +143,11 @@ def run_capture(
         source=captured.source,
     )
 
-    # --- 5. understand (Phase 2) -----------------------------------------
+    # --- 6. understand (Phase 2) -----------------------------------------
     if run_understanding and cleaned:
         _run_understanding(db, note, logprob_to_confidence(transcription.avg_logprob))
 
-    # --- 6. organize (Phase 3, Team Member 2) ------------------------------
+    # --- 7. organize (Phase 3, Team Member 2) ------------------------------
     # File the note into Subject -> Topic. Runs even when `run_understanding`
     # is False (understanding only adds a note_type/quality signal that
     # `organize()` does not currently require) so a transcript-only capture
@@ -146,7 +155,7 @@ def run_capture(
     if cleaned:
         _organize_note(db, note)
 
-    # --- 7. index + derive (Phase 4/5, Team Member 3) ----------------------
+    # --- 8. index + derive (Phase 4/5, Team Member 3) ----------------------
     # Runs after organization so the indexed metadata carries the topic the
     # note was just filed under, and after understanding so reminders and
     # contacts can read the entities it extracted.
@@ -173,7 +182,7 @@ def run_understanding_on_text(
     Returns (note_or_None, UnderstandingResult). Used by POST /understand so the
     understanding stage is reachable without a microphone.
     """
-    cleaned = clean_transcript(text)
+    cleaned = clean_transcript(correct_transcript_safe(text))
 
     note: Note | None = None
     if persist:
