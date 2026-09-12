@@ -23,6 +23,7 @@ uniform across the whole voice surface.
 
 from __future__ import annotations
 
+import difflib
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -404,6 +405,75 @@ def _handle_navigate(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
 # ---------------------------------------------------------------------------
 
 
+def _looks_like_a_retake(first: str, second: str) -> float:
+    """How much two notes read like the same thing said twice, 0-1.
+
+    Compared as word sequences rather than characters: a retake keeps the words
+    and the order, and differs in exactly the places the recogniser heard
+    differently ("failures and crooks" for "failures and more").
+    """
+    return difflib.SequenceMatcher(
+        None, first.lower().split(), second.lower().split()
+    ).ratio()
+
+
+#: One note being read: its id, its text, and when it was captured (ISO, so it
+#: sorts as a string).
+ReadableNote = tuple[str, str, str]
+
+
+def _collapse_repeats(items: list[ReadableNote]) -> tuple[list[ReadableNote], int]:
+    """Drop notes that are another note said again, keeping the newest.
+
+    **Newest, not longest.** A retake is usually the user saying it again
+    *because the first one was misheard*, so the later capture is their latest
+    word on it. Keeping the longest picked the opposite on real data: of four
+    fault tolerance notes it kept the one reading "the system steelworks" and
+    "in similar words", over a later one that had both right, because the bad
+    one was two characters longer. Length measures nothing about correctness.
+    Ties go to the longer text, which is the only thing left to prefer.
+
+    Order is the position of the first of each group, so a reading still runs in
+    the order the topic was listed in.
+
+    Only reading aloud does this. A *question* is answered from the retrieved
+    text, where a near-duplicate costs some context budget but changes nothing
+    the user hears; a *reading* is the text, so the repetition is the output.
+    """
+    settings = get_settings()
+    if not settings.read_aloud_collapse_repeats or len(items) < 2:
+        return items, 0
+
+    threshold = settings.read_aloud_repeat_threshold
+    kept: list[ReadableNote] = []
+    skipped = 0
+
+    for candidate in items:
+        _, body, created_at = candidate
+        match = next(
+            (
+                i
+                for i, (_, other, _) in enumerate(kept)
+                if _looks_like_a_retake(body, other) >= threshold
+            ),
+            None,
+        )
+        if match is None:
+            kept.append(candidate)
+            continue
+
+        skipped += 1
+        _, held_body, held_at = kept[match]
+        newer = created_at > held_at
+        same_age_but_fuller = created_at == held_at and len(body) > len(held_body)
+        if newer or same_age_but_fuller:
+            kept[match] = candidate
+
+    if skipped:
+        logger.info("collapsed %d repeated note(s) out of %d", skipped, len(items))
+    return kept, skipped
+
+
 def _handle_read_aloud(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
     """"Read my system design notes out loud."
 
@@ -426,21 +496,23 @@ def _handle_read_aloud(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
         )
 
     where = name
-    bodies: list[str] = []
-    note_ids: list[str] = []
+    readable: list[ReadableNote] = []
 
     topic = TopicRepository(db).find_best_name_match(name)
     if topic is not None:
-        filed = NoteRepository(db).list_by_topic(topic.id, limit=50)
-        bodies = [
-            (n.cleaned_text or n.raw_transcript or "").strip() for n in filed
+        readable = [
+            (
+                n.id,
+                (n.cleaned_text or n.raw_transcript or "").strip(),
+                n.created_at.isoformat() if n.created_at else "",
+            )
+            for n in NoteRepository(db).list_by_topic(topic.id, limit=50)
         ]
-        note_ids = [n.id for n in filed]
         where = topic.name
 
-    bodies = [b for b in bodies if b]
+    readable = [item for item in readable if item[1]]
 
-    if not bodies:
+    if not readable:
         # Nothing filed under that name - fall back to search, so this works
         # before the organizer has created a topic for it.
         #
@@ -451,11 +523,14 @@ def _handle_read_aloud(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
         # fallback could never find anything the first attempt missed.
         unscoped = replace(parsed, target_name="")
         result = retrieve(db, parsed.query or name, unscoped)
-        bodies = [n.text.strip() for n in result.notes if n.text.strip()]
-        note_ids = [n.note_id for n in result.notes]
+        readable = [
+            (n.note_id, n.text.strip(), n.created_at)
+            for n in result.notes
+            if n.text.strip()
+        ]
         where = name
 
-    if not bodies:
+    if not readable:
         text = f"I don't have any notes about {name}."
         return VoiceQueryOutcome(
             intent=Intent.READ_ALOUD.value,
@@ -465,10 +540,22 @@ def _handle_read_aloud(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
             speech=_voice(text, earcon=Earcon.NO_RESULTS.value),
         )
 
+    # Sources stay the notes that were actually read, so a client showing them
+    # never lists one the user did not hear.
+    readable, skipped = _collapse_repeats(readable)
+    note_ids = [note_id for note_id, _, _ in readable]
+    bodies = [body for _, body, _ in readable]
+
     count = len(bodies)
     # Said before the reading starts: a listener with no screen needs to know
-    # how much is coming before it begins.
+    # how much is coming before it begins - and needs to be told when something
+    # was left out, because a note that silently vanishes from a verbatim
+    # reading is indistinguishable from one that was never saved.
     preamble = f"Reading {count} note{'s' if count != 1 else ''} from {where}."
+    if skipped:
+        preamble += (
+            f" Skipping {skipped} that repeat{'s' if skipped == 1 else ''} another."
+        )
     # Numbered aloud so the boundary between notes is audible - without it
     # several notes run together into one long paragraph.
     body = (
@@ -484,7 +571,12 @@ def _handle_read_aloud(db: Session, parsed: ParsedIntent) -> VoiceQueryOutcome:
         spoken=spoken,
         answer_text=body,
         sources=note_ids,
-        data={"note_count": count, "read_from": where, "verbatim": True},
+        data={
+            "note_count": count,
+            "skipped_repeats": skipped,
+            "read_from": where,
+            "verbatim": True,
+        },
         speech=_voice(spoken, earcon=Earcon.RESULTS_FOUND.value),
     )
 
