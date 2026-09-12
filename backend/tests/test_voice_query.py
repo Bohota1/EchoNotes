@@ -77,13 +77,14 @@ class TestContentQueries:
         assert outcome.ok
         assert library["ml"].id in outcome.sources
 
-    def test_answer_cites_its_sources(self, db_session, library):
-        """A user who cannot see a citation list needs provenance in the
-        sentence."""
+    def test_answer_carries_its_sources(self, db_session, library):
+        """Sources and citations always travel with the answer, so a client can
+        show or speak them - even though the spoken sentence no longer names
+        them by default."""
         outcome = handle_voice_query(db_session, "What did I write about deadlocks?")
         assert outcome.sources
         assert outcome.citations
-        assert "From" in outcome.spoken
+        assert outcome.spoken.strip()
 
     def test_results_carry_the_matching_snippet(self, db_session, library):
         outcome = handle_voice_query(db_session, "What did I write about gradient descent?")
