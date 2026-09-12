@@ -64,8 +64,7 @@ design?" is a question and is answered as one.
 
 | Key | Action | Source |
 |---|---|---|
-| `Space` (hold) | Push-to-talk: record while held, transcribe on release | EchoNotes Feature 1 |
-| `Ctrl+Alt+Space` | Toggle-to-talk: start recording, press again to stop. For long lectures | EchoNotes Feature 1 |
+| `Space` | Record a note, press again to stop - see the voice console above | EchoNotes Feature 1 |
 | `Ctrl+Alt+E` | Edit the focused note (inline field pre-filled with its text) | Idea11y §4.2 |
 | `Ctrl+Alt+M` | Move / re-file the focused note (drop-down of current Topics) | Idea11y §4.2 |
 | `Ctrl+Alt+D` | Delete the focused note, with confirmation | Idea11y §4.2 |
@@ -85,17 +84,21 @@ collide with JAWS or NVDA reserved keys.
 ### One real conflict to handle: the spacebar
 
 `Space` is the requested trigger, and it is also how a screen reader activates a focused button
-and how browsers scroll a page. Three rules resolve it, and they must be implemented in
-`frontend/src/components/Capture/SpacebarTrigger.tsx`:
+and how browsers scroll a page. Two rules resolve it, in `VoiceConsole.tsx`:
 
 1. **Never capture `Space` while focus is inside a text input, textarea or `contenteditable`.**
    Typing a space must type a space.
-2. **Never capture `Space` while focus is on a `button`, `checkbox`, `link` or `select`.** In those
-   cases `Space` keeps its native activation meaning.
-3. Everywhere else — the outline body, headings, list items, the page background — a held `Space`
-   starts recording. Because screen readers in browse mode intercept keys before the page sees
-   them, the app also registers `Ctrl+Alt+Space` as an always-available equivalent, and the
-   settings panel lets the user rebind the trigger entirely (`CAPTURE_TRIGGER` in `.env`).
+2. **Never capture `Space` while focus is on a `button` or a link.** There, `Space` keeps its
+   native activation meaning, or every other control on the page breaks for keyboard users.
+
+Everywhere else - headings, list items, the page background - `Space` starts and stops a
+recording.
+
+**One component owns the key.** There is one microphone, so there can be one handler. An earlier
+Capture panel bound `Space` on the window as well, and a single press reached both: the panel
+fired a one-shot capture while the console started a recording. The panel has been removed rather
+than made to negotiate, because two owners of one device is not a thing that can be made safe -
+only a thing that can be made rarer.
 
 Announce the trigger state on every change: an earcon on start, a different earcon on stop, and a
 spoken "Recording" / "Transcribing" / "Note added under <Topic>".
