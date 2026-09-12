@@ -1,9 +1,16 @@
 """Voice query and retrieval endpoints (Phase 4, Team Member 3).
 
-    POST /api/v1/retrieval/query    answer a transcribed utterance
-    POST /api/v1/retrieval/voice    upload audio, transcribe, then answer
-    POST /api/v1/retrieval/reindex  rebuild the vector index from SQLite
-    GET  /api/v1/retrieval/status   what the index currently holds
+    POST /api/v1/retrieval/query      answer a transcribed utterance
+    POST /api/v1/retrieval/voice      upload audio, transcribe, then answer
+    POST /api/v1/retrieval/ask/start  open the mic to record a question
+    POST /api/v1/retrieval/ask/stop   stop, transcribe and answer it
+    POST /api/v1/retrieval/reindex    rebuild the vector index from SQLite
+    GET  /api/v1/retrieval/status     what the index currently holds
+
+`/ask/start` and `/ask/stop` are the spoken half of the two-button interface:
+Space records a note, Enter asks a question, and nothing else is needed to
+operate the app without sight. They share the one microphone with
+`/capture/start`, so the two cannot run at once.
 
 `/query` is the endpoint the whole voice loop runs on. It handles content
 questions, hierarchy questions, navigation, organization commands and reminder
@@ -22,6 +29,7 @@ import logging
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.errors import AudioCaptureError
 from app.db.session import get_db
 from app.rag.indexer import index_stats, reindex_all
 from app.rag.service import VoiceQueryOutcome, handle_voice_query
@@ -142,6 +150,127 @@ async def voice_query(
     db.commit()
     response = _to_response(outcome, include_speech=True)
     response.data = {**response.data, "transcribed_utterance": utterance}
+    return response
+
+
+@router.post("/session/start", summary="Open a conversation session")
+def session_start():
+    """Shift opens one. Inside it, follow-ups resolve against what was already
+    asked, so "how does it relate to system design" finds the right notes."""
+    from app.rag.conversation import get_conversation_store
+
+    session = get_conversation_store().start()
+    return {
+        "session_id": session.id,
+        "spoken": "Conversation started. Press Enter to ask a question.",
+    }
+
+
+@router.post("/session/{session_id}/end", summary="End a conversation session")
+def session_end(session_id: str):
+    from app.rag.conversation import get_conversation_store
+
+    session = get_conversation_store().end(session_id)
+    turns = len(session.turns) if session else 0
+    return {
+        "session_id": session_id,
+        "turns": turns,
+        "spoken": (
+            f"Conversation ended after {turns} question{'s' if turns != 1 else ''}."
+            if turns
+            else "Conversation ended."
+        ),
+    }
+
+
+@router.post(
+    "/ask/start",
+    summary="Start recording a spoken question",
+)
+def ask_start():
+    """Open the microphone to record a question.
+
+    Deliberately the same `LiveRecorder` singleton that `/capture/start` uses:
+    there is one microphone, so recording a question while a note is being
+    recorded is a conflict, not something to queue. Whichever started first
+    keeps the microphone and the second call is refused.
+    """
+    from app.capture.live import get_live_recorder
+
+    recorder = get_live_recorder()
+    try:
+        recorder.start()
+    except AudioCaptureError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    return {
+        "recording": True,
+        "spoken": "Listening for your question.",
+        "capture_id": recorder.capture_id,
+    }
+
+
+@router.post(
+    "/ask/stop",
+    response_model=VoiceQueryResponse,
+    summary="Stop recording, transcribe the question, and answer it",
+)
+def ask_stop(
+    focused_note_id: str | None = None,
+    session_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """The spoken half of the two-button loop: audio in, spoken answer out.
+
+    Transcription goes through exactly the same stack a captured note uses, so
+    a question benefits from the same model, the same forced language and the
+    same vocabulary priming - a question misheard as "system designs" finds
+    nothing, so this matters as much here as it does for the note itself.
+    """
+    from app.capture.live import get_live_recorder
+    from app.nlp.correction import correct_transcript_safe
+    from app.pipeline.capture_pipeline import transcribe_audio
+
+    recorder = get_live_recorder()
+    try:
+        captured = recorder.stop()
+    except AudioCaptureError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    try:
+        transcription = transcribe_audio(captured.path)
+    except Exception as exc:
+        logger.exception("could not transcribe the spoken question")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"could not transcribe the question: {exc}",
+        ) from exc
+
+    question = correct_transcript_safe(transcription.text, kind="question").strip()
+
+    if not question:
+        # Silence, or speech the recogniser could not make out. Said plainly
+        # rather than returned as an error: the user cannot see a status code.
+        outcome = VoiceQueryOutcome(
+            intent="unknown",
+            ok=False,
+            spoken="I didn't catch a question. Press Enter and try again.",
+        )
+        return _to_response(outcome, include_speech=True)
+
+    outcome = handle_voice_query(
+        db, question, focused_note_id=focused_note_id, session_id=session_id
+    )
+    db.commit()
+
+    response = _to_response(outcome, include_speech=True)
+    # What the system heard, so a user who was misheard can tell why the answer
+    # is odd - and so the UI can show it alongside the answer.
+    response.data = {**response.data, "question": question}
     return response
 
 
