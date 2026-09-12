@@ -15,10 +15,20 @@ from __future__ import annotations
 import difflib
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Entity, Note, Subject, Topic, Understanding
+from app.db.models import (
+    Entity,
+    Note,
+    NoteContent,
+    NoteTopic,
+    Subject,
+    Topic,
+    TopicConnection,
+    Understanding,
+    WebResource,
+)
 
 
 class NoteRepository:
@@ -307,7 +317,7 @@ class TopicRepository:
         return list(self.db.execute(stmt).scalars().all())
 
     def create(self, subject_id: str, name: str, kind: str = "topic") -> Topic:
-        topic = Topic(subject_id=subject_id, name=name.strip(), kind=kind, summary_stale=True)
+        topic = Topic(subject_id=subject_id, name=name.strip(), kind=kind)
         self.db.add(topic)
         self.db.flush()
         return topic
@@ -316,6 +326,39 @@ class TopicRepository:
         existing = self.get_by_name(subject_id, name)
         if existing is not None:
             return existing, False
+        return self.create(subject_id, name, kind=kind), True
+
+    def get_or_create_fuzzy(
+        self, subject_id: str, name: str, kind: str = "topic", cutoff: float | None = None
+    ) -> tuple[Topic, bool]:
+        """Like `get_or_create`, but a near-miss on an existing topic in this
+        subject reuses it instead of creating a near-duplicate.
+
+        Exists because the no-LLM topic-extraction fallback
+        (`app.graph.topic_extraction._fallback_extract`) has no notion that
+        "Array" and "Arrays" are the same topic - each note's extraction is
+        independent, so a plural or minor wording difference used to spawn a
+        second topic for something already in the graph. `get_by_name` only
+        ever did an exact (case-insensitive) match, so this was never caught.
+        The LLM path does not need this as often (it is more consistent
+        about naming), but a near-miss there is just as worth reusing.
+        """
+        exact = self.get_by_name(subject_id, name)
+        if exact is not None:
+            return exact, False
+
+        if cutoff is None:
+            from app.config import get_settings
+
+            cutoff = get_settings().topic_similarity_threshold
+
+        candidates = self.list_for_subject(subject_id)
+        if candidates:
+            names = [t.name for t in candidates]
+            best = difflib.get_close_matches(name, names, n=1, cutoff=cutoff)
+            if best:
+                return next(t for t in candidates if t.name == best[0]), False
+
         return self.create(subject_id, name, kind=kind), True
 
     def get_or_create_unfiled(self) -> Topic:
@@ -341,19 +384,6 @@ class TopicRepository:
             return None
         return next(t for t in topics if t.name == best[0])
 
-    def mark_stale(self, topic_id: str) -> None:
-        topic = self.db.get(Topic, topic_id)
-        if topic is not None:
-            topic.summary_stale = True
-            self.db.flush()
-
-    def set_summary(self, topic_id: str, summary: str) -> None:
-        topic = self.db.get(Topic, topic_id)
-        if topic is not None:
-            topic.summary = summary
-            topic.summary_stale = False
-            self.db.flush()
-
     def count(self) -> int:
         return self.db.execute(select(func.count(Topic.id))).scalar_one()
 
@@ -370,71 +400,162 @@ class TopicRepository:
         return True
 
 
-class LntAnalysisRepository:
-    """Stores the Section 3.4 analysis artefacts for a note.
+# ---------------------------------------------------------------------------
+# Knowledge graph (NexaNota redesign): note<->topic links, topic-to-topic
+# connections (graph edges), per-topic web resources, and a note's generated
+# three-area content.
+# ---------------------------------------------------------------------------
 
-    The nested structures are serialised to JSON on the way in and parsed on the
-    way out, so callers deal in plain Python and never see the encoding.
-    """
 
+class NoteTopicRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def upsert(self, note_id: str, analysis) -> "LntAnalysisRow":
-        import json
+    def set_for_note(self, note_id: str, links: list[dict]) -> list[NoteTopic]:
+        """Replace a note's topic links with `links`
+        (each `{"topic_id", "rank", "confidence"}`), so re-organizing a note
+        (an edit, a retry) never leaves stale links behind."""
+        for stale in self.db.execute(
+            select(NoteTopic).where(NoteTopic.note_id == note_id)
+        ).scalars():
+            self.db.delete(stale)
+        self.db.flush()
 
-        from app.db.models import LntAnalysisRow
+        created = []
+        for payload in links:
+            link = NoteTopic(note_id=note_id, **payload)
+            self.db.add(link)
+            created.append(link)
+        self.db.flush()
+        return created
 
-        payload = {
-            "summary": analysis.summary,
-            "themes": json.dumps(analysis.themes),
-            "lda_topics": json.dumps(analysis.lda_topics),
-            "word_frequencies": json.dumps(
-                dict(sorted(analysis.word_frequencies.items(), key=lambda kv: -kv[1])[:200])
-            ),
-            "density": json.dumps({**analysis.density, "zipf": analysis.zipf}),
-            "word_count": analysis.word_count,
-            "sentence_count": analysis.sentence_count,
-        }
+    def list_for_note(self, note_id: str) -> list[NoteTopic]:
+        stmt = (
+            select(NoteTopic)
+            .where(NoteTopic.note_id == note_id)
+            .order_by(NoteTopic.rank.asc())
+            .options(selectinload(NoteTopic.topic))
+        )
+        return list(self.db.execute(stmt).scalars().all())
 
-        existing = self.db.execute(
-            select(LntAnalysisRow).where(LntAnalysisRow.note_id == note_id)
+    def list_for_topic(self, topic_id: str) -> list[NoteTopic]:
+        stmt = select(NoteTopic).where(NoteTopic.topic_id == topic_id)
+        return list(self.db.execute(stmt).scalars().all())
+
+
+class TopicConnectionRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def list_for_subject(self, subject_id: str) -> list[TopicConnection]:
+        stmt = (
+            select(TopicConnection)
+            .where(TopicConnection.subject_id == subject_id)
+            .options(
+                selectinload(TopicConnection.topic_a),
+                selectinload(TopicConnection.topic_b),
+            )
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def exists(self, topic_a_id: str, topic_b_id: str) -> bool:
+        """Order-independent: A-B and B-A are the same edge."""
+        stmt = select(func.count(TopicConnection.id)).where(
+            or_(
+                (TopicConnection.topic_a_id == topic_a_id)
+                & (TopicConnection.topic_b_id == topic_b_id),
+                (TopicConnection.topic_a_id == topic_b_id)
+                & (TopicConnection.topic_b_id == topic_a_id),
+            )
+        )
+        return self.db.execute(stmt).scalar_one() > 0
+
+    def create(
+        self,
+        subject_id: str,
+        topic_a_id: str,
+        topic_b_id: str,
+        *,
+        label: str = "",
+        confidence: float = 0.0,
+        method: str = "llm",
+    ) -> TopicConnection | None:
+        """No-op (returns None) if this pair, in either order, already has an
+        edge or if `topic_a_id == topic_b_id` - a topic never connects to
+        itself."""
+        if topic_a_id == topic_b_id or self.exists(topic_a_id, topic_b_id):
+            return None
+        connection = TopicConnection(
+            subject_id=subject_id,
+            topic_a_id=topic_a_id,
+            topic_b_id=topic_b_id,
+            label=label,
+            confidence=confidence,
+            method=method,
+        )
+        self.db.add(connection)
+        self.db.flush()
+        return connection
+
+
+class WebResourceRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def list_for_topic(self, topic_id: str) -> list[WebResource]:
+        stmt = select(WebResource).where(WebResource.topic_id == topic_id)
+        return list(self.db.execute(stmt).scalars().all())
+
+    def replace_for_topic(self, topic_id: str, resources: list[dict]) -> list[WebResource]:
+        for stale in self.db.execute(
+            select(WebResource).where(WebResource.topic_id == topic_id)
+        ).scalars():
+            self.db.delete(stale)
+        self.db.flush()
+
+        created = []
+        for payload in resources:
+            resource = WebResource(topic_id=topic_id, **payload)
+            self.db.add(resource)
+            created.append(resource)
+        self.db.flush()
+        return created
+
+
+class NoteContentRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_for_note(self, note_id: str) -> NoteContent | None:
+        return self.db.execute(
+            select(NoteContent).where(NoteContent.note_id == note_id)
         ).scalar_one_or_none()
 
+    def upsert_generated(self, note_id: str, **fields) -> NoteContent:
+        """Write freshly generated content.
+
+        Never touches `edit_markdown` once `edited_by_user` is set - a
+        student's edit is never silently overwritten by a later
+        regeneration (NexaNota 4.3.3's Edit Area is the student's own).
+        """
+        existing = self.get_for_note(note_id)
         if existing is not None:
-            for key, value in payload.items():
+            if existing.edited_by_user:
+                fields.pop("edit_markdown", None)
+            for key, value in fields.items():
                 setattr(existing, key, value)
             self.db.flush()
             return existing
-
-        row = LntAnalysisRow(note_id=note_id, **payload)
-        self.db.add(row)
+        record = NoteContent(note_id=note_id, **fields)
+        self.db.add(record)
         self.db.flush()
-        return row
+        return record
 
-    def get_for_note(self, note_id: str) -> dict | None:
-        import json
-
-        from app.db.models import LntAnalysisRow
-
-        row = self.db.execute(
-            select(LntAnalysisRow).where(LntAnalysisRow.note_id == note_id)
-        ).scalar_one_or_none()
-        if row is None:
+    def save_edit(self, note_id: str, markdown: str) -> NoteContent | None:
+        content = self.get_for_note(note_id)
+        if content is None:
             return None
-
-        def parse(raw: str, fallback):
-            try:
-                return json.loads(raw)
-            except (TypeError, ValueError):
-                return fallback
-
-        return {
-            "summary": row.summary,
-            "themes": parse(row.themes, []),
-            "lda_topics": parse(row.lda_topics, []),
-            "word_frequencies": parse(row.word_frequencies, {}),
-            "density": parse(row.density, {}),
-            "word_count": row.word_count,
-            "sentence_count": row.sentence_count,
-        }
+        content.edit_markdown = markdown
+        content.edited_by_user = True
+        self.db.flush()
+        return content

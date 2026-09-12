@@ -96,12 +96,14 @@ class Subject(Base):
 
 
 class Topic(Base):
-    """Idea11y Section 4.1's Cluster, adapted: a Topic or Project under a Subject.
+    """A node in the course knowledge graph (NexaNota Sections 4.1/4.3.2,
+    replacing the Idea11y-based "AI-generated cluster summary" design this
+    table used to carry).
 
-    `summary` is the Idea11y "AI-generated cluster summary" (Section 4.1),
-    regenerated whenever a child note is added, edited or moved -
-    `summary_stale` marks it for lazy regeneration rather than blocking the
-    write that triggered it on an LLM call (see `app/hierarchy/cluster_summary.py`).
+    A Topic no longer holds its own rolling summary: NexaNota generates
+    content per *note* (`NoteContent`, three areas), not per topic. What a
+    Topic now carries is its place in the graph - which notes touch it
+    (`NoteTopic`) and which other topics it connects to (`TopicConnection`).
     """
 
     __tablename__ = "topics"
@@ -113,8 +115,10 @@ class Topic(Base):
     )
     name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(20), default=TopicKind.TOPIC.value)
-    summary: Mapped[str] = mapped_column(Text, default="")
-    summary_stale: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: True for a topic the LLM suggested as cross-disciplinary "further
+    #: reading" (NexaNota 4.3.2) rather than one extracted from a note's own
+    #: text - lets the graph view show these differently.
+    is_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -122,9 +126,16 @@ class Topic(Base):
     )
 
     subject: Mapped[Subject] = relationship(back_populates="topics")
+    #: The note this topic was first extracted from is `Note.topic_id`
+    #: (kept as the "primary" placement so every existing single-topic
+    #: consumer - RAG metadata, reminders - keeps working unchanged); the
+    #: full 2-3 topics a note maps to live in `NoteTopic` below.
     notes: Mapped[list[Note]] = relationship(
         back_populates="topic",
         order_by="Note.created_at.desc()",
+    )
+    note_links: Mapped[list[NoteTopic]] = relationship(
+        back_populates="topic", cascade="all, delete-orphan"
     )
 
 
@@ -152,6 +163,11 @@ class Note(Base):
     asr_avg_logprob: Mapped[float | None] = mapped_column(Float, nullable=True)
     asr_no_speech_prob: Mapped[float | None] = mapped_column(Float, nullable=True)
     asr_segment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: JSON list of {"start", "end", "text"} - the per-segment transcript
+    #: `app.asr.transcriber.TranscriptSegment` already produces, persisted so
+    #: `app.graph.replay` can rebuild the timestamped view (NexaNota 4.3.1).
+    #: "[]" when the note was not captured from timed audio (e.g. typed text).
+    asr_segments_json: Mapped[str] = mapped_column(Text, default="[]")
 
     # --- LNT multilanguage evidence (paper Sections 3.2-3.3) ---
     #: What the speaker actually spoke, before any translation. `language`
@@ -199,6 +215,16 @@ class Note(Base):
     )
     contact_links: Mapped[list[NoteContact]] = relationship(
         back_populates="note", cascade="all, delete-orphan"
+    )
+
+    # --- Knowledge graph (NexaNota redesign): the 2-3 topics this note maps
+    # to, and its generated 3-area content. `topic_id` above stays the first
+    # (primary) of these, kept for every consumer that only needs one.
+    topic_links: Mapped[list[NoteTopic]] = relationship(
+        back_populates="note", cascade="all, delete-orphan"
+    )
+    content: Mapped[NoteContent | None] = relationship(
+        back_populates="note", cascade="all, delete-orphan", uselist=False
     )
 
 
@@ -416,3 +442,145 @@ class LntAnalysisRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     note: Mapped[Note] = relationship(back_populates="lnt_analysis")
+
+
+# ---------------------------------------------------------------------------
+# Knowledge graph (NexaNota: An AI-Powered Smart Linked Lecture Note-Taking
+# System, ICBDIE 2025, Sections 4.1/4.3.2/4.3.3), replacing the Idea11y-based
+# Subject -> Topic -> Note tree's per-topic summary and single-topic-per-note
+# design. Subject is kept as the graph's container (the paper's "course"; see
+# `app/graph/service.py`). Everything below is new.
+# ---------------------------------------------------------------------------
+
+
+class NoteTopic(Base):
+    """One of the 2-3 topics a note maps to (NexaNota 4.1: "2 to 3 topics
+    could be subtracted from the transcribed text" per capture).
+
+    A link table rather than widening `Note.topic_id` to a list, because a
+    note's relationship to each of its topics needs its own rank (which one
+    the extractor named first/most central) and confidence.
+    """
+
+    __tablename__ = "note_topics"
+    __table_args__ = (UniqueConstraint("note_id", "topic_id", name="uq_note_topic"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    note_id: Mapped[str] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), index=True
+    )
+    topic_id: Mapped[str] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    #: 0 = the topic also recorded as `Note.topic_id` (the primary one).
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    note: Mapped[Note] = relationship(back_populates="topic_links")
+    topic: Mapped[Topic] = relationship(back_populates="note_links")
+
+
+class TopicConnection(Base):
+    """One edge of the course knowledge graph (NexaNota 4.3.2/D3): a
+    connection the LLM identified between two topics.
+
+    Scoped to a Subject (the paper's per-course graph), undirected in
+    meaning - `topic_a_id`/`topic_b_id` order is not significant, but is
+    kept as an ordered pair with a matching unique constraint so the same
+    connection is never stored twice in either direction.
+    """
+
+    __tablename__ = "topic_connections"
+    __table_args__ = (
+        UniqueConstraint("topic_a_id", "topic_b_id", name="uq_topic_connection_pair"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    subject_id: Mapped[str] = mapped_column(
+        ForeignKey("subjects.id", ondelete="CASCADE"), index=True
+    )
+    topic_a_id: Mapped[str] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    topic_b_id: Mapped[str] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    #: What the LLM says connects them, e.g. "both covered under Deadlock
+    #: avoidance". Empty when found by the non-LLM fallback (co-occurrence
+    #: in one note), which has no rationale to give.
+    label: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    method: Mapped[str] = mapped_column(String(20), default="llm")  # "llm" | "co-occurrence"
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    topic_a: Mapped[Topic] = relationship(foreign_keys=[topic_a_id])
+    topic_b: Mapped[Topic] = relationship(foreign_keys=[topic_b_id])
+
+
+class WebResource(Base):
+    """An external resource suggested for a topic (NexaNota 4.3.2: "searched
+    for ... online resources", System overview: "academic paper or
+    professional blogs").
+
+    `url` is nullable: the LLM has no real web access through this project's
+    Anthropic integration, so a resource the model could not verify is
+    stored as a search suggestion (title + `search_query`, `url=None`)
+    rather than risk showing a fabricated link as if it were real. See the
+    redesign plan, section 6.
+    """
+
+    __tablename__ = "web_resources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    topic_id: Mapped[str] = mapped_column(
+        ForeignKey("topics.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    search_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resource_type: Mapped[str] = mapped_column(String(20), default="paper")  # "paper" | "blog"
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    topic: Mapped[Topic] = relationship()
+
+
+class NoteContent(Base):
+    """A note's generated three-area content (NexaNota 4.3.3, D2):
+    Note-Taking Area, Link Area and Edit Area.
+
+    `edit_markdown` starts as a copy of the generated Note-Taking Area text
+    and then diverges the moment a student edits it - regeneration must
+    never overwrite it silently (see `app/graph/note_generator.py`).
+    """
+
+    __tablename__ = "note_content"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    note_id: Mapped[str] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), unique=True, index=True
+    )
+
+    # --- Note-Taking Area (the needfinding's 3 required subsections) ---
+    definition: Mapped[str] = mapped_column(Text, default="")
+    example_analysis: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+
+    # --- Link Area: related-topic-note links; web-resource URLs live on
+    # WebResource, reached through this note's topics. ---
+    related_note_ids: Mapped[str] = mapped_column(Text, default="[]")  # JSON list[str]
+
+    # --- Edit Area ---
+    edit_markdown: Mapped[str] = mapped_column(Text, default="")
+    edited_by_user: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    method: Mapped[str] = mapped_column(String(20), default="llm")  # "llm" | "extractive"
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )
+
+    note: Mapped[Note] = relationship(back_populates="content")
