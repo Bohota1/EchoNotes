@@ -13,6 +13,8 @@
 export type NoteType = "academic" | "brainstorm" | "todo";
 export type EntityKind = "person" | "date" | "deadline" | "task" | "key_phrase";
 
+
+
 export interface Entity {
   kind: EntityKind;
   value: string;
