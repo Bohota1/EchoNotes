@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import pytest
 
+from app.config import get_settings
 from app.rag.conversation import get_conversation_store
 from app.rag.intent import Intent, parse_intent
-from app.rag.service import handle_voice_query
+from app.rag.service import _collapse_repeats, handle_voice_query
 
 DESIGN_NOTE = (
     "System design is about how the pieces of a large application fit together. "
@@ -178,3 +179,112 @@ class TestSessionsRecordTurns:
             assert session.is_empty
         finally:
             get_conversation_store().end(session.id)
+
+
+# Two recordings of the same explanation, as they actually come back: the same
+# words in the same order, differing where the recogniser heard differently.
+RETAKE_EARLY = (
+    "What is fault tolerance? Fault tolerance is the ability of our system to "
+    "continue working even when one or more components fail. In similar words, "
+    "something breaks, the system steelworks."
+)
+RETAKE_LATE = (
+    "What is fault tolerance? Fault tolerance is the ability of a system to "
+    "continue working even when one or more components fail. In simple words, "
+    "something breaks, the system still works."
+)
+
+
+class TestCollapsingRetakes:
+    """Re-recording the same explanation is normal - the user says it again
+    because the first attempt was misheard. Reading every version aloud sounds
+    exactly like reading one note twice, which is what it was reported as."""
+
+    def test_a_retake_is_collapsed(self):
+        kept, skipped = _collapse_repeats(
+            [
+                ("late", RETAKE_LATE, "2026-09-12T11:08:00"),
+                ("early", RETAKE_EARLY, "2026-09-12T11:05:00"),
+            ]
+        )
+        assert skipped == 1
+        assert len(kept) == 1
+
+    def test_the_newest_wins_even_when_it_is_shorter(self):
+        """Length measures nothing about correctness. On real data, keeping the
+        longest kept "the system steelworks" over a later capture that had it
+        right, because the bad one was two characters longer."""
+        assert len(RETAKE_EARLY) > len(RETAKE_LATE), "the premise of this test"
+        kept, _ = _collapse_repeats(
+            [
+                ("early", RETAKE_EARLY, "2026-09-12T11:05:00"),
+                ("late", RETAKE_LATE, "2026-09-12T11:08:00"),
+            ]
+        )
+        assert [note_id for note_id, _, _ in kept] == ["late"]
+        assert "still works" in kept[0][1]
+
+    def test_distinct_notes_are_both_kept(self):
+        kept, skipped = _collapse_repeats(
+            [
+                ("a", DESIGN_NOTE, "2026-09-12T10:00:00"),
+                ("b", FAULT_NOTE, "2026-09-12T10:05:00"),
+            ]
+        )
+        assert skipped == 0
+        assert len(kept) == 2
+
+    def test_order_follows_the_first_of_each_group(self):
+        kept, _ = _collapse_repeats(
+            [
+                ("design", DESIGN_NOTE, "2026-09-12T10:00:00"),
+                ("early", RETAKE_EARLY, "2026-09-12T10:05:00"),
+                ("late", RETAKE_LATE, "2026-09-12T10:09:00"),
+            ]
+        )
+        assert [note_id for note_id, _, _ in kept] == ["design", "late"]
+
+    def test_a_single_note_is_left_alone(self):
+        items = [("a", DESIGN_NOTE, "2026-09-12T10:00:00")]
+        assert _collapse_repeats(items) == (items, 0)
+
+    def test_it_can_be_turned_off(self, monkeypatch):
+        monkeypatch.setattr(
+            get_settings(), "read_aloud_collapse_repeats", False, raising=False
+        )
+        items = [
+            ("early", RETAKE_EARLY, "2026-09-12T11:05:00"),
+            ("late", RETAKE_LATE, "2026-09-12T11:08:00"),
+        ]
+        assert _collapse_repeats(items) == (items, 0)
+
+
+class TestTheSkipIsAudible:
+    """A note that silently vanishes from a verbatim reading cannot be told
+    apart from one that was never saved."""
+
+    def test_the_reading_says_what_it_skipped(self, db_session, make_note):
+        make_note(RETAKE_EARLY)
+        make_note(RETAKE_LATE)
+        outcome = handle_voice_query(
+            db_session, "Read my fault tolerance notes out loud"
+        )
+        assert outcome.ok
+        assert outcome.data["skipped_repeats"] == 1
+        assert "Skipping" in outcome.spoken
+
+    def test_the_same_sentence_is_not_read_twice(self, db_session, make_note):
+        make_note(RETAKE_EARLY)
+        make_note(RETAKE_LATE)
+        outcome = handle_voice_query(
+            db_session, "Read my fault tolerance notes out loud"
+        )
+        assert outcome.spoken.count("What is fault tolerance?") == 1
+
+    def test_sources_are_only_the_notes_that_were_read(self, db_session, make_note):
+        make_note(RETAKE_EARLY)
+        make_note(RETAKE_LATE)
+        outcome = handle_voice_query(
+            db_session, "Read my fault tolerance notes out loud"
+        )
+        assert len(outcome.sources) == outcome.data["note_count"]
