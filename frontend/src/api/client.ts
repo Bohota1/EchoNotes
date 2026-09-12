@@ -195,6 +195,46 @@ export function ask(payload: VoiceQueryRequest): Promise<VoiceQueryResponse> {
   });
 }
 
+/** Open the microphone to record a spoken question. */
+export function askStart(): Promise<{ recording: boolean; spoken: string }> {
+  return request<{ recording: boolean; spoken: string }>(
+    `${BASE}/retrieval/ask/start`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * Stop recording, transcribe the question and answer it.
+ *
+ * `sessionId` puts the question inside a conversation, so a follow-up that
+ * says "it" is resolved against what was already asked. Without one the
+ * question is answered on its own — which is correct for a one-off ask.
+ */
+export function askStop(sessionId?: string | null): Promise<VoiceQueryResponse> {
+  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  return request<VoiceQueryResponse>(`${BASE}/retrieval/ask/stop${query}`, {
+    method: "POST",
+  });
+}
+
+/** Open a conversation. Follow-ups asked inside it keep their context. */
+export function sessionStart(): Promise<{ session_id: string; spoken: string }> {
+  return request<{ session_id: string; spoken: string }>(
+    `${BASE}/retrieval/session/start`,
+    { method: "POST" },
+  );
+}
+
+/** Close a conversation and forget its history. */
+export function sessionEnd(
+  sessionId: string,
+): Promise<{ session_id: string; turns: number; spoken: string }> {
+  return request<{ session_id: string; turns: number; spoken: string }>(
+    `${BASE}/retrieval/session/${encodeURIComponent(sessionId)}/end`,
+    { method: "POST" },
+  );
+}
+
 // --- reminders -------------------------------------------------------------
 
 export async function upcomingReminders(
