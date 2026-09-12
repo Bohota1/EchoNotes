@@ -23,6 +23,18 @@ engine = create_engine(
     settings.database_url,
     connect_args={"check_same_thread": False} if _is_sqlite else {},
     future=True,
+    # Test a pooled connection with a cheap round trip before handing it out,
+    # and replace it transparently if it has died. Managed Postgres closes idle
+    # connections from its side - Neon's free tier suspends the database
+    # entirely after a few minutes of inactivity - and SQLAlchemy otherwise
+    # hands the next request a socket that is already gone, which surfaces as a
+    # bare Internal Server Error on the first capture after a break. Costs one
+    # trivial query per checkout. Pointless for SQLite, where there is no
+    # connection to go stale.
+    pool_pre_ping=not _is_sqlite,
+    # Retire connections older than this rather than waiting for them to fail
+    # the ping. Comfortably under the idle timeouts managed providers use.
+    pool_recycle=280 if not _is_sqlite else -1,
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
