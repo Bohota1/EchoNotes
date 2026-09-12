@@ -25,6 +25,8 @@ backend/data/images/*
 backend/data/chroma/*
 !backend/data/**/.gitkeep
 *.db
+# Timestamped copies made before a schema change or a migration.
+*.db.backup-*
 *.sqlite3
 
 # NLTK / model caches
