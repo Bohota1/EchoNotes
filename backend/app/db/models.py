@@ -204,9 +204,6 @@ class Note(Base):
     entities: Mapped[list[Entity]] = relationship(
         back_populates="note", cascade="all, delete-orphan"
     )
-    lnt_analysis: Mapped[LntAnalysisRow | None] = relationship(
-        back_populates="note", cascade="all, delete-orphan", uselist=False
-    )
     topic: Mapped[Topic | None] = relationship(back_populates="notes")
 
     # --- Phase 5 (Team Member 3): derived reminders and person mentions ---
@@ -408,49 +405,6 @@ class NoteContact(Base):
 
     note: Mapped[Note] = relationship(back_populates="contact_links")
     contact: Mapped[Contact] = relationship(back_populates="mentions")
-
-
-class LntAnalysisRow(Base):
-    """The LNT qualitative content analysis for one note (paper §3.4).
-
-    Summary, themes, LDA topics and the word-frequency table are stored as JSON
-    because their shape is nested and they are read back whole, never queried
-    field by field.
-    """
-
-    __tablename__ = "note_lnt_analysis"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    note_id: Mapped[str] = mapped_column(
-        ForeignKey("notes.id", ondelete="CASCADE"), unique=True, index=True
-    )
-
-    #: §3.4.5 extractive summary - the paper's "minutes" of the lecture
-    summary: Mapped[str] = mapped_column(Text, default="")
-    #: §3.4.6 themes, each with its topics (the shape of the paper's Table 5)
-    themes: Mapped[str] = mapped_column(Text, default="[]")
-    #: §3.4.7 LDA topics with their top terms
-    lda_topics: Mapped[str] = mapped_column(Text, default="[]")
-    #: §3.4.4 word frequency table, root-word keys
-    word_frequencies: Mapped[str] = mapped_column(Text, default="{}")
-    #: §5.1 words per theme / per topic, and the Zipf fit
-    density: Mapped[str] = mapped_column(Text, default="{}")
-
-    word_count: Mapped[int] = mapped_column(Integer, default=0)
-    sentence_count: Mapped[int] = mapped_column(Integer, default=0)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-
-    note: Mapped[Note] = relationship(back_populates="lnt_analysis")
-
-
-# ---------------------------------------------------------------------------
-# Knowledge graph (NexaNota: An AI-Powered Smart Linked Lecture Note-Taking
-# System, ICBDIE 2025, Sections 4.1/4.3.2/4.3.3), replacing the Idea11y-based
-# Subject -> Topic -> Note tree's per-topic summary and single-topic-per-note
-# design. Subject is kept as the graph's container (the paper's "course"; see
-# `app/graph/service.py`). Everything below is new.
-# ---------------------------------------------------------------------------
 
 
 class NoteTopic(Base):
