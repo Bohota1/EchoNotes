@@ -59,6 +59,9 @@ class VoiceQueryOutcome:
     speech: SpeechDirective | None = None
 
 
+
+
+
 def _voice(text: str, earcon: str | None = None, interrupt: bool = False) -> SpeechDirective:
     return speak(text, earcon=earcon, interrupt=interrupt)
 
