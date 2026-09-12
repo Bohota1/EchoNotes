@@ -17,6 +17,7 @@ touching this file:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -70,6 +71,16 @@ def persist_capture(
         asr_avg_logprob=transcription.avg_logprob if transcription else None,
         asr_no_speech_prob=transcription.no_speech_prob if transcription else None,
         asr_segment_count=len(transcription.segments) if transcription else None,
+        asr_segments_json=(
+            json.dumps(
+                [
+                    {"start": s.start, "end": s.end, "text": s.text}
+                    for s in transcription.segments
+                ]
+            )
+            if transcription and transcription.segments
+            else "[]"
+        ),
         source_language=getattr(transcription, "source_language", None) if transcription else None,
         translated=bool(getattr(transcription, "translated", False)) if transcription else False,
         chunk_count=getattr(transcription, "chunk_count", None) if transcription else None,
@@ -207,17 +218,19 @@ def _run_understanding(db: Session, note: Note, transcription_confidence: float)
 
 
 def _organize_note(db: Session, note: Note) -> None:
-    """Phase 3 hand-off: file the note into Subject -> Topic
-    (`app.understanding.organizer.organize`, Team Member 2's work) once the
-    transcript exists. Wrapped in try/except for the same reason as
-    `_run_understanding`: organization must never be the reason a capture is
-    lost - a note that fails to file stays reachable via `GET /notes` with
-    `topic_id=None` rather than disappearing.
+    """Knowledge-graph hand-off (NexaNota redesign, Team Member 2's work):
+    extract 2-3 topics, place the note in the course graph, connect topics,
+    and generate the note's 3-area content (`app.graph.service.organize_note`
+    - replaces the old Idea11y-based `app.understanding.organizer.organize`).
+    Wrapped in try/except for the same reason as `_run_understanding`:
+    organization must never be the reason a capture is lost - a note that
+    fails to file stays reachable via `GET /notes` with `topic_id=None`
+    rather than disappearing.
     """
     try:
-        from app.understanding.organizer import organize
+        from app.graph.service import organize_note
 
-        organize(db, note)
+        organize_note(db, note)
     except Exception:
         logger.exception("organization failed for note %s; note kept unfiled", note.id)
 
