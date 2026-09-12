@@ -48,6 +48,7 @@ class Intent(str, Enum):
     NAVIGATE = "navigate"
     ORGANIZE = "organize"          # delegated to app.hierarchy.commands
     REMINDERS = "reminders"
+    READ_ALOUD = "read_aloud"      # "read my system design notes out loud"
     UNKNOWN = "unknown"
 
 
@@ -233,6 +234,21 @@ _REMINDERS_RE = re.compile(
     re.I,
 )
 
+#: "Read my notes on X", "read out what I wrote about X", "read X aloud".
+#: Distinct from every other intent: the user is asking for their own words back
+#: verbatim, not for an answer synthesised from them. Requires an explicit
+#: read/play verb - "what do my notes say about X" is a question, not a request
+#: to be read to.
+_READ_ALOUD_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:read|play|say)\s+"
+    r"(?:me\s+|out\s+|aloud\s+|back\s+)*"
+    r"(?:my\s+|the\s+)?(?:notes?\s+)?"
+    r"(?:(?:on|about|for|regarding)\s+)?"
+    r"(?P<name>.+?)"
+    r"(?:\s+(?:notes?|aloud|out\s+loud|to\s+me|back))*\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+
 _SUMMARIZE_RE = re.compile(
     r"^\s*(?:summari[sz]e|give\s+me\s+a\s+summary\s+of|sum\s+up)\s+"
     r"(?P<rest>.+?)\s*[.!?]?\s*$",
@@ -339,6 +355,16 @@ def parse_intent(utterance: str, now: datetime | None = None) -> ParsedIntent:
         candidate = match.group("name")
         if not re.search(r"\b(?:about|on|regarding|mentioning)\b", candidate, re.I):
             return build(Intent.NAVIGATE, target=candidate)
+
+    # --- Read my own words back -------------------------------------------
+    match = _READ_ALOUD_RE.match(raw)
+    if match:
+        name = match.group("name").strip(" ?.!,")
+        # "read" with nothing after it is not a request for anything in
+        # particular, and reading the whole library aloud is never what was
+        # meant.
+        if name:
+            return build(Intent.READ_ALOUD, query=_clean_query(name), target=name)
 
     # --- Content questions ------------------------------------------------
     match = _SUMMARIZE_RE.match(raw)
