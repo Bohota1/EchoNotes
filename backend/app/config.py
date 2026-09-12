@@ -113,10 +113,25 @@ class Settings(BaseSettings):
 
     # ---- Speech to text (Phase 1) ----
     asr_backend: str = "faster_whisper"
-    whisper_model: str = "base"
+    # "base" mishears technical vocabulary badly - measured: "linked list" ->
+    # "lengthless", "computer science" -> "computer size", "means planning how"
+    # -> "needs flattening powers of". "small" fixes those and is the default
+    # for it. Cost: a ~460MB download on the first real transcription, cached
+    # afterwards, and captures take noticeably longer than on "base". Drop back
+    # to "base" on a slow machine; "medium" is better again and slower still.
+    whisper_model: str = "small"
     whisper_device: str = "cpu"
+    # int8 quantises the model to run faster, losing some precision. It is the
+    # right trade here: "small" at int8 still beats "base" at float32. Use
+    # "float32" for the most accurate transcription on CPU, several times slower.
     whisper_compute_type: str = "int8"
-    whisper_language: str | None = None  # None -> auto-detect
+    # Fixed to English rather than auto-detected. Detection on a few seconds of
+    # accented speech is unreliable - measured: English read as Hindi at 0.37
+    # confidence, which flipped the pipeline into `translate` and stored a
+    # sentence the speaker never said. Set to None to restore auto-detection
+    # (the multilanguage behaviour the LNT paper describes), or to any other
+    # code to pin a different language.
+    whisper_language: str | None = "en"
     whisper_beam_size: int = 5
     whisper_vad_filter: bool = True
 
@@ -146,14 +161,31 @@ class Settings(BaseSettings):
     # unless this is deliberately turned on.
     translate_to_english: bool = False
     # The paper's Section 3.3 silence-based chunking (see `LNTTranscriber`).
-    # False falls back to one whole-file pass, which reads better as prose but
-    # loses the per-chunk confidence and real sentence boundaries.
-    whisper_chunk_audio: bool = True
-    # Domain vocabulary Whisper is primed with on every chunk (e.g. course
-    # jargon it would otherwise mishear as a common soundalike - "deque" as
-    # "DQ"). Empty by default: this is a per-deployment hint, not something
-    # with a sensible universal value.
-    whisper_initial_prompt: str | None = None
+    #
+    # Off by default, which is a deliberate departure from the paper. Section
+    # 3.3 chunks at every pause and recognises each piece alone; that suited the
+    # 2021 Google API, which had no cross-clip context to lose. Whisper reads a
+    # 30-second window and depends on it, so splitting actively hurts: measured,
+    # a pause mid-sentence produced the standalone sentences "Like." and
+    # "Thanks.", and one clause came back duplicated. True restores the paper's
+    # route, and with it per-chunk confidence and real sentence boundaries.
+    whisper_chunk_audio: bool = False
+    # Domain vocabulary Whisper is primed with. It strongly prefers words it has
+    # seen in the prompt, so listing the terms actually spoken stops them losing
+    # to common soundalikes - measured: "deques" came back as "DQ" without it.
+    #
+    # This default is the computer-science vocabulary this project is used for.
+    # It is a per-deployment hint with no universally correct value: change it
+    # to match whatever subject is being recorded, via WHISPER_INITIAL_PROMPT.
+    # Keep it short - a long prompt starts steering the transcript rather than
+    # just its vocabulary.
+    whisper_initial_prompt: str | None = (
+        "A lecture on computer science. Terms used: system design, scalability, "
+        "architecture, database, cache, load balancer, API, server, latency, "
+        "throughput, linked list, array, stack, queue, deque, binary tree, graph, "
+        "hash table, algorithm, data structure, recursion, complexity, deadlock, "
+        "mutex, semaphore, normalization, index, transaction."
+    )
     # Carries the tail of the previous chunk's text into the next chunk's
     # prompt, so a fragment like "like" is not transcribed as the standalone
     # sentence "Like." - see `LNTTranscriber._prompt_for_chunk`.
