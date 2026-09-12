@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     whisper_language: str | None = "en"
     whisper_beam_size: int = 5
     whisper_vad_filter: bool = True
+    # Drop segments Whisper itself thinks contain no speech. It reports a
+    # `no_speech_prob` per segment and will still emit text above it - trained
+    # on YouTube captions, it fills silence with sign-offs like "Thank you for
+    # watching." Measured: a near-silent capture produced exactly that at
+    # no_speech_prob 0.61, and the app stored it as the user's words. A
+    # hallucinated note is worse than a missing one: the user never said it and
+    # has no way to know it is there.
+    whisper_no_speech_threshold: float = 0.6
 
     # `app/asr/transcriber.py::get_transcriber()` already read every setting
     # below to choose and run a transcriber, but none of them were ever
@@ -204,10 +212,23 @@ class Settings(BaseSettings):
     # or leaves less than this much of the wording intact, is prose improvement
     # and is rejected - see `app/nlp/correction.py`.
     transcript_correction_max_length_drift: float = 0.25
+    # A floor on that percentage, in words. A proportion is meaningless at small
+    # counts: repairing "Various system design" to "What is system design" adds
+    # one word, which is 33% of a three-word question and would be rejected,
+    # while the same edit in a hundred-word note is 1%. The allowance is
+    # whichever of the two is larger.
+    transcript_correction_max_word_drift: int = 2
     transcript_correction_min_similarity: float = 0.60
     # Below this, there is too little surrounding meaning to disambiguate
     # anything, and an over-eager rewrite does proportionally more damage.
     transcript_correction_min_words: int = 8
+    # Questions get a much lower bar, because the two carry opposite risks. A
+    # note IS the content: rewriting it destroys what the user said, and a short
+    # note is where that does proportionally most damage. A question is never
+    # stored as content, is almost always short, and a mishearing sends the
+    # search after the wrong thing - measured: "What is system design" heard as
+    # "Various system design".
+    transcript_correction_min_words_question: int = 2
 
     # ---- LLM abstraction (Phase 2) ----
     # The pipeline works with no key at all: rules run first and the LLM is
@@ -306,6 +327,29 @@ class Settings(BaseSettings):
     rag_answer_max_words: int = 45
     rag_summary_max_words: int = 90
     rag_answer_max_tokens: int = 600
+    # Whether a spoken answer ends with where it came from ("From Deadlock,
+    # under Operating Systems."). Off: the clause is vague exactly where it
+    # matters ("and 1 other place" names nothing) and repeats after every
+    # answer. The sources are still on the response in full for any client that
+    # wants to show or speak them - this only controls the spoken sentence.
+    speak_answer_provenance: bool = False
+
+    # ---- Conversation sessions (Shift opens one, Enter asks inside it) ----
+    # A follow-up is rewritten into a standalone question before retrieval.
+    # Embedding "how does it relate to system design" searches for "it relate",
+    # so the notes the user means never surface and the answer is grounded in
+    # the wrong ones. The rewrite changes only what is searched for - every
+    # answer is still built solely from the notes that search returns.
+    conversation_rewrite_followups: bool = True
+    conversation_rewrite_max_tokens: int = 120
+    # Turns of history given to the rewrite and to the answerer. Older turns
+    # rarely disambiguate a pronoun and cost tokens on every question.
+    conversation_context_turns: int = 4
+    # Turns kept per session at all.
+    conversation_max_turns: int = 12
+    # Sessions are ended explicitly; this only reclaims ones abandoned when a
+    # tab was closed mid-conversation.
+    conversation_ttl_seconds: int = 1800
 
     # ---- Text to speech (Phase 4, Team Member 3) ----
     # "directive" returns structured speech instructions for the browser's Web
