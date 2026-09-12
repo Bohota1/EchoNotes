@@ -121,14 +121,40 @@ export interface VoiceQueryRequest {
   speak?: boolean;
 }
 
+/** One note the retriever matched, with the evidence for why. */
+export interface RetrievedNote {
+  note_id: string;
+  text: string;
+  /** The chunk that actually matched - what the answer quotes from. */
+  snippet: string;
+  score: number;
+  subject_id: string;
+  subject_name: string;
+  topic_id: string;
+  topic_name: string;
+  note_type: string;
+  source: string;
+  created_at: string;
+  /** Which passes matched: "vector", "lexical", "filter". */
+  matched_by: string[];
+}
+
+export interface Citation {
+  index: string;
+  note_id: string;
+  location: string;
+  created_at: string;
+}
+
 export interface VoiceQueryResponse {
   intent: string;
   ok: boolean;
+  /** Always safe to read aloud, including when `ok` is false. */
   spoken: string;
   answer: string;
-  sources: unknown[];
-  citations: unknown[];
-  results: unknown[];
+  sources: string[];
+  citations: Citation[];
+  results: RetrievedNote[];
   confidence: number;
   method: string;
   filter_description: string;
