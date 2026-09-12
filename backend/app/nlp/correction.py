@@ -109,6 +109,23 @@ def _similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a.split(), b.split()).ratio()
 
 
+def _words_changed(original: str, corrected: str) -> int:
+    """How many of the original's words the correction did not keep.
+
+    Counted rather than measured as a ratio, because a ratio says nothing
+    useful about short text: repairing "Various system design" to "What is
+    system design" keeps two words of three, which is a 57% similarity and a
+    33% length change - both of which look catastrophic and neither of which
+    describes what happened, namely that one word was fixed.
+
+    Word count, unlike a proportion, means the same thing at every length.
+    """
+    original_words = original.split()
+    matcher = difflib.SequenceMatcher(None, original_words, corrected.split())
+    kept = sum(block.size for block in matcher.get_matching_blocks())
+    return max(len(original_words) - kept, 0)
+
+
 def _is_plausible_correction(original: str, corrected: str) -> tuple[bool, str]:
     """Reject a 'correction' that is really a rewrite.
 
@@ -127,19 +144,37 @@ def _is_plausible_correction(original: str, corrected: str) -> tuple[bool, str]:
     if original_words == 0:
         return False, "nothing to correct"
 
-    drift = abs(corrected_words - original_words) / original_words
-    if drift > settings.transcript_correction_max_length_drift:
-        return False, f"length changed by {drift:.0%}"
+    # One rule, in words rather than proportions: how many of the original's
+    # words did this not keep? A repair swaps a few; a rewrite replaces most.
+    #
+    # The allowance is the larger of a small absolute number and a proportion,
+    # so it is meaningful at both ends. A three-word question may have two
+    # words fixed; a hundred-word note may have twenty-five. Neither may be
+    # replaced wholesale.
+    changed = _words_changed(original, corrected)
+    allowed = max(
+        settings.transcript_correction_max_word_drift,
+        int(original_words * settings.transcript_correction_max_length_drift),
+    )
+    if changed > allowed:
+        return False, f"{changed} of {original_words} words changed (max {allowed})"
 
-    similarity = _similarity(original, corrected)
-    if similarity < settings.transcript_correction_min_similarity:
-        return False, f"only {similarity:.0%} of the wording survived"
+    # Length is bounded separately, so a "correction" cannot bolt on a new
+    # sentence while leaving the original intact.
+    added = abs(corrected_words - original_words)
+    if added > allowed:
+        return False, f"length changed by {added} words (max {allowed})"
 
     return True, ""
 
 
-def correct_transcript(text: str) -> CorrectionResult:
-    """Ask the LLM to repair recognition errors. Never raises."""
+def correct_transcript(text: str, *, kind: str = "note") -> CorrectionResult:
+    """Ask the LLM to repair recognition errors. Never raises.
+
+    `kind` is "note" or "question". A question uses a much lower length
+    threshold and is told it is a question, because a four-word query is normal
+    and a mishearing in it sends the search after the wrong thing.
+    """
     settings = get_settings()
     original = (text or "").strip()
 
@@ -149,7 +184,12 @@ def correct_transcript(text: str) -> CorrectionResult:
     if not original:
         return CorrectionResult(text=text, changed=False, method="skipped",
                                 reason="empty transcript")
-    if len(original.split()) < settings.transcript_correction_min_words:
+    min_words = (
+        settings.transcript_correction_min_words_question
+        if kind == "question"
+        else settings.transcript_correction_min_words
+    )
+    if len(original.split()) < min_words:
         # Too short for the surrounding meaning to disambiguate anything, and
         # a short note is where an over-eager rewrite does proportionally the
         # most damage.
@@ -168,6 +208,18 @@ def correct_transcript(text: str) -> CorrectionResult:
     hint = ""
     if settings.whisper_initial_prompt:
         hint = f"Context: {settings.whisper_initial_prompt}\n\n"
+
+    if kind == "question":
+        # Knowing it is a question does most of the work. "Various system
+        # design" is a plausible phrase but an implausible question, and only a
+        # model told to expect a question will prefer "What is system design".
+        # Without this the model tidies the phrase instead of repairing it.
+        hint += (
+            "The text is a short spoken question the user asked about their own "
+            "notes, not a lecture note. It should read as a question. Recogniser "
+            'errors at the start of a question are common: "Various" or "Word is" '
+            'for "What is", "Do I" for "Does", and similar.\n\n'
+        )
 
     try:
         response = client.complete(
@@ -198,10 +250,10 @@ def correct_transcript(text: str) -> CorrectionResult:
     return CorrectionResult(text=corrected, changed=True, method="llm")
 
 
-def correct_transcript_safe(text: str) -> str:
+def correct_transcript_safe(text: str, *, kind: str = "note") -> str:
     """Just the text, for callers that do not care why. Never raises."""
     try:
-        return correct_transcript(text).text
+        return correct_transcript(text, kind=kind).text
     except Exception:
         logger.exception("transcript correction failed; keeping the transcript as-is")
         return text
