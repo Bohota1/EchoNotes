@@ -46,6 +46,7 @@ import { speak, speechSupported, stopSpeaking } from "@/a11y/speech";
 import {
   askStart,
   askStop,
+  cancelRecording,
   sessionEnd,
   sessionStart,
   startRecording,
@@ -73,6 +74,13 @@ interface Exchange {
 interface Props {
   /** Called after a note is captured, so the surrounding page can refresh. */
   onNoteCaptured?: () => void;
+  /**
+   * Read a saved note back in full. Off, the confirmation is just "Note
+   * saved" - useful when dictating several notes in a row. Answers and
+   * state changes are always spoken: they are the only way to know what
+   * happened.
+   */
+  autoSpeak?: boolean;
 }
 
 /** Keys typed into a field, or used to press a control, are never ours. */
@@ -87,7 +95,7 @@ function isTypingContext(target: EventTarget | null): boolean {
   return tag === "BUTTON" || tag === "A";
 }
 
-export function VoiceConsole({ onNoteCaptured }: Props) {
+export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
   const [mode, setMode] = useState<Mode>("idle");
   const [status, setStatus] = useState(
     "Press Space to record a note. Press Enter to ask a question. Press Shift to start a conversation.",
@@ -139,10 +147,13 @@ export function VoiceConsole({ onNoteCaptured }: Props) {
     try {
       const note = await stopRecording();
       const text = note.cleaned_text?.trim();
-      say(
-        text ? `Note saved. ${text}` : "Nothing was heard, so no note was saved.",
-        { status: text ? "Note saved." : "Nothing was heard, so no note was saved." },
-      );
+      if (!text) {
+        say("Nothing was heard, so no note was saved.");
+      } else {
+        say(autoSpeak ? `Note saved. ${text}` : "Note saved.", {
+          status: "Note saved.",
+        });
+      }
       onNoteCaptured?.();
     } catch (err) {
       setError((err as Error).message);
@@ -150,7 +161,24 @@ export function VoiceConsole({ onNoteCaptured }: Props) {
     } finally {
       setMode("idle");
     }
-  }, [onNoteCaptured, say]);
+  }, [autoSpeak, onNoteCaptured, say]);
+
+  /**
+   * Escape abandons a recording. The microphone has to be told: dropping the
+   * mode alone left the device open, and the next Space then failed on a
+   * recorder that was already running.
+   */
+  const cancelCapture = useCallback(async () => {
+    setMode("idle");
+    say("Cancelled.", { interrupt: true });
+    try {
+      await cancelRecording();
+    } catch {
+      // Escape means "never mind". The user has been told it is cancelled and
+      // the console is idle; surfacing a failure here would contradict that.
+      // If the device really is still open, the next Space says so.
+    }
+  }, [say]);
 
   // --- conversation: Shift ----------------------------------------------
 
@@ -247,8 +275,7 @@ export function VoiceConsole({ onNoteCaptured }: Props) {
         // Escape abandons a recording without saving or asking.
         if (event.key === "Escape" && modeRef.current !== "idle") {
           event.preventDefault();
-          setMode("idle");
-          say("Cancelled.", { interrupt: true });
+          void cancelCapture();
         }
         return;
       }
@@ -298,7 +325,15 @@ export function VoiceConsole({ onNoteCaptured }: Props) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [finishNote, finishQuestion, say, startNote, startQuestion, toggleSession]);
+  }, [
+    cancelCapture,
+    finishNote,
+    finishQuestion,
+    say,
+    startNote,
+    startQuestion,
+    toggleSession,
+  ]);
 
   const recording = mode === "note" || mode === "question";
 
