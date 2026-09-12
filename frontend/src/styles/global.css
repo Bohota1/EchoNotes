@@ -241,12 +241,6 @@ input[type="text"] {
 
 /* --- capture ------------------------------------------------------------- */
 
-.capture-result {
-  margin-top: 1.25rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
-}
-
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -430,12 +424,6 @@ input[type="text"] {
 
 /* --- capture controls, notices, checkboxes ------------------------------- */
 
-.capture-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  margin-bottom: 0.75rem;
-}
 .field {
   display: flex;
   flex-direction: column;
@@ -474,7 +462,6 @@ select {
   height: 1.05rem;
 }
 
-.capture-result .small-button,
 .note-detail .small-button,
 .answer .small-button {
   margin-top: 0.4rem;
@@ -604,33 +591,6 @@ select {
 }
 .replay-text {
   margin: 0.3rem 0 0.4rem;
-}
-
-/* --- live recording ------------------------------------------------------ */
-
-.record-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
-.recording-indicator {
-  margin: 0.5rem 0 0;
-  font-weight: 700;
-  color: var(--recording);
-}
-
-/* The dot pulses, but the word "Recording" and the running timer carry the
-   state on their own - never colour or motion alone. */
-@media (prefers-reduced-motion: no-preference) {
-  .recording-indicator {
-    animation: recording-pulse 1.6s ease-in-out infinite;
-  }
-}
-@keyframes recording-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
 }
 
 /* --- graph view toggle + visual (node/edge) diagram ------------------------
