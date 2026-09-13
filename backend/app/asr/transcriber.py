@@ -103,8 +103,11 @@ class Transcriber(abc.ABC):
     name: str = "base"
 
     @abc.abstractmethod
-    def transcribe(self, audio_path: Path, language: str | None = None) -> TranscriptionResult:
-        ...
+    def transcribe(
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
+    ) -> TranscriptionResult:
+        """`prompt` is context for this one recording, replacing the default
+        vocabulary hint - a spoken question passes one, a note does not."""
 
 
 class FasterWhisperTranscriber(Transcriber):
@@ -150,7 +153,9 @@ class FasterWhisperTranscriber(Transcriber):
         )
         return self._model
 
-    def transcribe(self, audio_path: Path, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
+    ) -> TranscriptionResult:
         if not Path(audio_path).exists():
             raise TranscriptionError(f"audio file not found: {audio_path}")
 
@@ -163,6 +168,7 @@ class FasterWhisperTranscriber(Transcriber):
                 language=language or settings.whisper_language,
                 beam_size=settings.whisper_beam_size,
                 vad_filter=settings.whisper_vad_filter,
+                initial_prompt=prompt,
             )
             # faster-whisper returns a generator; decoding happens on iteration.
             segments = [
@@ -356,7 +362,13 @@ class LNTTranscriber(Transcriber):
         return prompt[-800:] if prompt else None
 
     def _transcribe_whole(
-        self, model, audio_path: Path, normalized: Path, detected: str | None, task: str
+        self,
+        model,
+        audio_path: Path,
+        normalized: Path,
+        detected: str | None,
+        task: str,
+        prompt: str | None = None,
     ) -> TranscriptionResult:
         """One pass over the whole recording, no chunking.
 
@@ -373,7 +385,7 @@ class LNTTranscriber(Transcriber):
                 task=task,
                 beam_size=settings.whisper_beam_size,
                 vad_filter=vad,
-                initial_prompt=self._prompt_for_chunk([]),
+                initial_prompt=prompt or self._prompt_for_chunk([]),
             )
             segments = [s for s in segments if _is_speech(s)]
             return segments, info, " ".join(
@@ -419,7 +431,9 @@ class LNTTranscriber(Transcriber):
             source_language=detected,
         )
 
-    def transcribe(self, audio_path: Path, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
+    ) -> TranscriptionResult:
         from app.audio.chunking import split_on_silence_to_files
         from app.audio.normalization import normalize
 
@@ -493,7 +507,9 @@ class LNTTranscriber(Transcriber):
             # away, so one pass over the whole recording is more accurate - at
             # the cost of departing from the paper's Section 3.3.
             logger.info("chunking disabled; recognising the whole recording in one pass")
-            return self._transcribe_whole(model, audio_path, normalized, detected, task)
+            return self._transcribe_whole(
+                model, audio_path, normalized, detected, task, prompt=prompt
+            )
 
         try:
             chunk_paths = split_on_silence_to_files(normalized)
@@ -514,7 +530,7 @@ class LNTTranscriber(Transcriber):
                     task=task,
                     beam_size=settings.whisper_beam_size,
                     vad_filter=False,  # chunking already removed the silence
-                    initial_prompt=self._prompt_for_chunk(pieces),
+                    initial_prompt=prompt or self._prompt_for_chunk(pieces),
                 )
                 chunk_segments = list(chunk_segments)
             except Exception as exc:  # noqa: BLE001
