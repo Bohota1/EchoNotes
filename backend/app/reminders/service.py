@@ -31,7 +31,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Entity, EntityKind, Note, Reminder, ReminderSource, ReminderStatus
+from app.db.models import (
+    Entity,
+    EntityKind,
+    Note,
+    Reminder,
+    ReminderAlert,
+    ReminderSource,
+    ReminderStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +345,45 @@ class ReminderService:
             .order_by(Reminder.due_at.asc())
         )
         return list(self.db.execute(statement).scalars().all())
+
+    def due_soon(self, lead_minutes: int = 60, now: datetime | None = None) -> list[Reminder]:
+        """Pending reminders due within `lead_minutes` that have not yet been
+        announced, marking them announced as a side effect.
+
+        For the one-hour-before voice alert (blind users cannot glance at a
+        screen to notice a reminder is coming up, so the app has to say it).
+        Overdue-but-unannounced reminders are included too, same reasoning as
+        `upcoming()`: a missed alert (the app was closed at the time) should
+        still be spoken once, not silently skipped.
+
+        Marking happens here, not by the caller, so two near-simultaneous
+        polls can never both announce the same reminder: this call is the
+        single place that decides "has this been said yet", and it decides it
+        atomically with recording that it now has.
+        """
+        now = now or datetime.now()
+        horizon = now + timedelta(minutes=lead_minutes)
+        already_alerted = set(
+            self.db.execute(select(ReminderAlert.reminder_id)).scalars().all()
+        )
+
+        statement = (
+            select(Reminder)
+            .where(Reminder.status == ReminderStatus.PENDING.value)
+            .where(Reminder.due_at.is_not(None))
+            .where(Reminder.due_at <= horizon)
+            .order_by(Reminder.due_at.asc())
+        )
+        due_soon = [
+            r for r in self.db.execute(statement).scalars().all() if r.id not in already_alerted
+        ]
+
+        for reminder in due_soon:
+            self.db.add(ReminderAlert(reminder_id=reminder.id, alerted_at=now))
+        if due_soon:
+            self.db.flush()
+
+        return due_soon
 
     # --- update / delete -------------------------------------------------
 

@@ -255,6 +255,23 @@ export function completeReminder(reminderId: string): Promise<unknown> {
 }
 
 /**
+ * Reminders due soon that have not yet been announced by voice.
+ *
+ * Each reminder returned is marked announced server-side, so polling this on
+ * a timer (see App.tsx) speaks each one exactly once - blind users cannot
+ * glance at the Reminders panel to notice something is coming up.
+ */
+export async function dueSoonReminders(leadMinutes?: number): Promise<ReminderList> {
+  const query = leadMinutes ? `?lead_minutes=${leadMinutes}` : "";
+  const payload = await request<ReminderList>(`${BASE}/reminders/alerts/due-soon${query}`);
+  return {
+    ...payload,
+    reminders: expectArray(payload?.reminders, "reminders"),
+    count: payload?.count ?? 0,
+  };
+}
+
+/**
  * Guard a value the UI is about to iterate.
  *
  * A misrouted request (a dev-server proxy rule that does not cover the path,

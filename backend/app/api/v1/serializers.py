@@ -70,7 +70,7 @@ def understanding_out(note: Note) -> UnderstandingOut | None:
     )
 
 
-def capture_response(note: Note) -> CaptureResponse:
+def capture_response(note: Note, reminder_prompt: str | None = None) -> CaptureResponse:
     return CaptureResponse(
         note_id=note.id,
         source=note.source,
@@ -81,6 +81,7 @@ def capture_response(note: Note) -> CaptureResponse:
         created_at=note.created_at,
         transcription=transcription_out(note),
         understanding=understanding_out(note),
+        reminder_prompt=reminder_prompt,
     )
 
 

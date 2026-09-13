@@ -15,24 +15,60 @@
  * (H / Shift+H in NVDA and JAWS) works without any custom widget code.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { AnnouncerProvider } from "@/a11y/Announcer";
+import { AnnouncerProvider, useAnnouncer } from "@/a11y/Announcer";
 import { ErrorBoundary } from "@/a11y/ErrorBoundary";
+import { dueSoonReminders } from "@/api/client";
 import { GraphPanel } from "@/components/GraphPanel";
 import { NotesPanel } from "@/components/NotesPanel";
 import { RemindersPanel } from "@/components/RemindersPanel";
 import { VoiceConsole } from "@/components/VoiceConsole";
-import { speechSupported, stopSpeaking } from "@/a11y/speech";
+import { speak, speechSupported, stopSpeaking } from "@/a11y/speech";
+
+/** How often to check for a reminder that just entered its announce window.
+ * A minute is frequent enough that "one hour before" lands within a minute
+ * of the hour, and infrequent enough to be a trivial background request. */
+const DUE_SOON_POLL_MS = 60_000;
 
 function Dashboard() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoSpeak, setAutoSpeak] = useState(true);
+  const { announce } = useAnnouncer();
 
   const onCaptured = useCallback(() => {
     // Pull the new note, and any reminder detected from it, into their lists.
     setRefreshKey((key) => key + 1);
   }, []);
+
+  // The one-hour-before voice alert. Blind users cannot glance at the
+  // Reminders panel to notice something coming up, so this speaks it
+  // unprompted - the whole reason this project uses voice at all. The
+  // backend marks each reminder announced as it is returned (see
+  // ReminderService.due_soon), so this never repeats one already spoken,
+  // including across a page reload.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkDueSoon() {
+      try {
+        const list = await dueSoonReminders();
+        if (cancelled || list.reminders.length === 0) return;
+        announce(list.spoken, "assertive");
+        if (speechSupported()) speak(list.spoken);
+      } catch {
+        // A missed check is not worth interrupting the user over - the next
+        // one, a minute later, tries again.
+      }
+    }
+
+    void checkDueSoon();
+    const interval = window.setInterval(() => void checkDueSoon(), DUE_SOON_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [announce]);
 
   return (
     <>

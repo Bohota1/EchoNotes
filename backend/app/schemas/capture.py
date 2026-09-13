@@ -66,6 +66,15 @@ class CaptureResponse(BaseModel):
     created_at: datetime
     transcription: TranscriptionOut
     understanding: UnderstandingOut | None = None
+    reminder_prompt: str | None = Field(
+        default=None,
+        description=(
+            "A sentence to speak about a reminder this note triggered: a "
+            "confirmation once one is saved, or a follow-up question when the "
+            "note mentioned an event but left out its date or time. None for "
+            "an ordinary note. See app/reminders/clarify.py."
+        ),
+    )
 
 
 class CaptureSourceOut(BaseModel):

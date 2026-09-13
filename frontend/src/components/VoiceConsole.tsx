@@ -156,6 +156,12 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
       const text = note.cleaned_text?.trim();
       if (!text) {
         say("Nothing was heard, so no note was saved.");
+      } else if (note.reminder_prompt) {
+        // A reminder question ("When is your meeting?") or confirmation
+        // ("Reminder set...") takes the place of the usual "Note saved" -
+        // it is the more useful thing to say, and it is what the user needs
+        // to answer next by recording another note the same way.
+        say(note.reminder_prompt, { status: note.reminder_prompt });
       } else {
         say(autoSpeak ? `Note saved. ${text}` : "Note saved.", {
           status: "Note saved.",

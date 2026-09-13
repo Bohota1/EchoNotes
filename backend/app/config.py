@@ -443,6 +443,15 @@ class Settings(BaseSettings):
     reminder_auto_create_confidence: float = 0.60
     reminder_lookahead_hours: int = 24
     contact_match_cutoff: float = 0.82
+    # How long before a reminder's due time the voice console should announce
+    # it out loud (see ReminderService.due_soon). Blind users cannot glance at
+    # a screen to notice something is coming up, so this fires proactively.
+    reminder_alert_lead_minutes: int = 60
+    # How long an event mention ("I have a meeting") waits for its missing
+    # date or time answer before being abandoned. Long enough for the user to
+    # think and answer, short enough that an unrelated later note is never
+    # mistaken for the answer to a question the user has forgotten about.
+    reminder_clarification_ttl_minutes: int = 30
 
     @property
     def cors_origin_list(self) -> list[str]:

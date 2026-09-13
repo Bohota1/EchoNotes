@@ -23,6 +23,8 @@ class EntityKindOut(str, Enum):
     DEADLINE = "deadline"
     TASK = "task"
     KEY_PHRASE = "key_phrase"
+    #: A clock time ("3:30 am") - see app/db/models.py's EntityKind.TIME.
+    TIME = "time"
 
 
 class EntityOut(BaseModel):

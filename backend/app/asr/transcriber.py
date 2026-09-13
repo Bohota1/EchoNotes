@@ -3,8 +3,6 @@
 `Transcriber` is the interface; `FasterWhisperTranscriber` is the shipped
 implementation. Everything downstream depends on `TranscriptionResult`, so a
 different ASR engine can be dropped in without touching the pipeline.
-`GroqTranscriber` (app/asr/groq_transcriber.py) is one: the same Whisper
-family at large-v3, hosted by Groq, chosen with ASR_BACKEND=groq.
 
 Why faster-whisper: it decodes audio through bundled PyAV rather than an
 external ffmpeg binary, and it reports per-segment `avg_logprob` and
@@ -80,23 +78,27 @@ class TranscriptionResult:
     def is_empty(self) -> bool:
         return not self.text.strip()
 
-    def unclear_passages(self, logprob_floor: float | None = None) -> list[str]:
-        """The segments the recogniser was least sure of, as text.
+    def unclear_passages(self) -> list[str]:
+        """Segment texts the recogniser was least sure of.
 
-        Handed to the LLM correction step as the places a misheard word most
-        likely is. Segments with no score are left out: no evidence of doubt
-        is not evidence of it.
+        Named to the transcript-correction LLM (`app.nlp.correction`) so it
+        checks those words against the sentence instead of second-guessing
+        the whole transcript with equal suspicion - see
+        `Settings.transcript_correction_unclear_logprob`'s comment for the
+        measurements behind the default threshold.
         """
-        floor = (
-            get_settings().transcript_correction_unclear_logprob
-            if logprob_floor is None
-            else logprob_floor
-        )
-        return [
-            s.text
-            for s in self.segments
-            if s.text and s.avg_logprob is not None and s.avg_logprob < floor
+        from app.config import get_settings
+
+        settings = get_settings()
+        floor = settings.transcript_correction_unclear_logprob
+        passages = [
+            segment.text.strip()
+            for segment in self.segments
+            if segment.avg_logprob is not None
+            and segment.avg_logprob < floor
+            and segment.text.strip()
         ]
+        return passages[: settings.transcript_correction_max_unclear]
 
 
 class Transcriber(abc.ABC):
@@ -106,8 +108,7 @@ class Transcriber(abc.ABC):
     def transcribe(
         self, audio_path: Path, language: str | None = None, prompt: str | None = None
     ) -> TranscriptionResult:
-        """`prompt` is context for this one recording, replacing the default
-        vocabulary hint - a spoken question passes one, a note does not."""
+        ...
 
 
 class FasterWhisperTranscriber(Transcriber):
@@ -168,6 +169,11 @@ class FasterWhisperTranscriber(Transcriber):
                 language=language or settings.whisper_language,
                 beam_size=settings.whisper_beam_size,
                 vad_filter=settings.whisper_vad_filter,
+                # No call site passes a real value yet (see
+                # capture_pipeline.transcribe_audio's docstring - this is
+                # reserved for a spoken question's vocabulary hint), so this
+                # is always None today and behaves exactly as before this
+                # parameter existed.
                 initial_prompt=prompt,
             )
             # faster-whisper returns a generator; decoding happens on iteration.
@@ -262,58 +268,6 @@ def detect_language(model, audio_path: Path) -> tuple[str | None, float | None]:
         return None, None
 
 
-#: Phrases Whisper emits when it has nothing to transcribe. It was trained on
-#: subtitled video, so silence gets filled with the sign-offs that end one.
-#: Matched only when the whole segment is one of them - a real note may well
-#: contain the words "thank you".
-_HALLUCINATED_ON_SILENCE = frozenset(
-    phrase.lower()
-    for phrase in (
-        "Thank you.", "Thank you for watching.", "Thanks for watching.",
-        "Thank you for watching!", "Thanks for watching!",
-        "Please subscribe.", "Like and subscribe.",
-        "You", "Bye.", "Bye-bye.", "Okay.",
-        "Subtitles by the Amara.org community",
-        "Transcription by ESO. Translation by -",
-    )
-)
-
-
-def _is_speech(segment) -> bool:
-    """Whether a segment is really speech, or Whisper filling a silence.
-
-    Two signals, and the first is the honest one: Whisper reports a
-    `no_speech_prob` per segment and then emits text regardless of it. Measured
-    on a near-silent capture, it produced "Thank you for watching." at
-    no_speech_prob 0.61 and the app stored that as the user's note.
-
-    Dropping a real quiet sentence is a cost worth paying against that. A missed
-    note is visible - the user sees nothing was saved and repeats it. An
-    invented one is not: it sits in the notes looking exactly like something
-    they said.
-    """
-    from app.config import get_settings
-
-    text = (getattr(segment, "text", "") or "").strip()
-    if not text:
-        return False
-
-    probability = getattr(segment, "no_speech_prob", None)
-    if probability is not None and probability >= get_settings().whisper_no_speech_threshold:
-        logger.info(
-            "dropping segment %r (no_speech_prob %.2f)", text[:60], probability
-        )
-        return False
-
-    if text.lower().strip(" .!?") in {
-        p.strip(" .!?") for p in _HALLUCINATED_ON_SILENCE
-    }:
-        logger.info("dropping known silence artefact %r", text[:60])
-        return False
-
-    return True
-
-
 class LNTTranscriber(Transcriber):
     """Whisper driven through the LNT framework's audio pipeline.
 
@@ -362,13 +316,7 @@ class LNTTranscriber(Transcriber):
         return prompt[-800:] if prompt else None
 
     def _transcribe_whole(
-        self,
-        model,
-        audio_path: Path,
-        normalized: Path,
-        detected: str | None,
-        task: str,
-        prompt: str | None = None,
+        self, model, audio_path: Path, normalized: Path, detected: str | None, task: str
     ) -> TranscriptionResult:
         """One pass over the whole recording, no chunking.
 
@@ -377,36 +325,16 @@ class LNTTranscriber(Transcriber):
         not follow the paper's Section 3.3.
         """
         settings = get_settings()
-
-        def run(vad: bool):
-            segments, info = model.transcribe(
-                str(normalized),
-                language=detected if task == "transcribe" else None,
-                task=task,
-                beam_size=settings.whisper_beam_size,
-                vad_filter=vad,
-                initial_prompt=prompt or self._prompt_for_chunk([]),
-            )
-            segments = [s for s in segments if _is_speech(s)]
-            return segments, info, " ".join(
-                s.text.strip() for s in segments if s.text.strip()
-            )
-
-        segments, info, text = run(settings.whisper_vad_filter)
-
-        if not text.strip() and settings.whisper_vad_filter:
-            # Voice-activity detection decided the whole recording was silence.
-            # It is tuned for long audio with real gaps, and on a short or quiet
-            # note it discards the speech itself - measured: a six-second
-            # capture of "So, hi." transcribed as nothing with VAD on and
-            # correctly with it off.
-            #
-            # Retried only when VAD found nothing at all, so a normal recording
-            # keeps the benefit and a quiet one is not silently lost. The cost
-            # of being wrong the other way is a note the user spoke and the app
-            # threw away without saying so.
-            logger.info("VAD found no speech; retrying without it")
-            segments, info, text = run(False)
+        segments, info = model.transcribe(
+            str(normalized),
+            language=detected if task == "transcribe" else None,
+            task=task,
+            beam_size=settings.whisper_beam_size,
+            vad_filter=settings.whisper_vad_filter,
+            initial_prompt=self._prompt_for_chunk([]),
+        )
+        segments = list(segments)
+        text = " ".join(s.text.strip() for s in segments if s.text.strip())
 
         collected = [
             TranscriptSegment(
@@ -434,6 +362,10 @@ class LNTTranscriber(Transcriber):
     def transcribe(
         self, audio_path: Path, language: str | None = None, prompt: str | None = None
     ) -> TranscriptionResult:
+        # `prompt` is accepted for interface parity with `Transcriber` (see
+        # its docstring) but not yet threaded into `_prompt_for_chunk` below,
+        # which already builds its own prompt from settings per chunk - not
+        # changed here, to avoid altering this pipeline's existing behaviour.
         from app.audio.chunking import split_on_silence_to_files
         from app.audio.normalization import normalize
 
@@ -445,25 +377,12 @@ class LNTTranscriber(Transcriber):
         model = self._load_model()
 
         # --- 1. normalise (Section 3.3) ------------------------------------
-        # Only when chunking will actually run. Normalisation exists to serve
-        # chunking: it puts every recording at a known loudness so the silence
-        # threshold in `app.audio.chunking` means the same thing for a quiet
-        # phone recording and a loud lecture hall. With chunking off there is
-        # no threshold to calibrate, and it is not free - it gains the audio,
-        # attenuates anything above the median, then gains it again, which is
-        # a compressor. Measured on a real capture, the same model and settings
-        # gave "the system still works" on the raw audio and "the system
-        # steelworks" on the normalised one, reproducibly: flattening the
-        # dynamics removes what Whisper uses to separate near-homophones.
-        if settings.whisper_chunk_audio:
-            try:
-                normalized = normalize(audio_path)
-            except Exception as exc:  # noqa: BLE001
-                # Losing normalisation degrades chunking; losing the capture
-                # does not have to follow.
-                logger.warning("normalisation failed (%s); using the raw audio", exc)
-                normalized = audio_path
-        else:
+        try:
+            normalized = normalize(audio_path)
+        except Exception as exc:  # noqa: BLE001
+            # Losing normalisation degrades chunking; losing the capture does
+            # not have to follow.
+            logger.warning("normalisation failed (%s); using the raw audio", exc)
             normalized = audio_path
 
         # --- 2. detect the language (Section 3.2) --------------------------
@@ -507,9 +426,7 @@ class LNTTranscriber(Transcriber):
             # away, so one pass over the whole recording is more accurate - at
             # the cost of departing from the paper's Section 3.3.
             logger.info("chunking disabled; recognising the whole recording in one pass")
-            return self._transcribe_whole(
-                model, audio_path, normalized, detected, task, prompt=prompt
-            )
+            return self._transcribe_whole(model, audio_path, normalized, detected, task)
 
         try:
             chunk_paths = split_on_silence_to_files(normalized)
@@ -530,7 +447,7 @@ class LNTTranscriber(Transcriber):
                     task=task,
                     beam_size=settings.whisper_beam_size,
                     vad_filter=False,  # chunking already removed the silence
-                    initial_prompt=prompt or self._prompt_for_chunk(pieces),
+                    initial_prompt=self._prompt_for_chunk(pieces),
                 )
                 chunk_segments = list(chunk_segments)
             except Exception as exc:  # noqa: BLE001
@@ -598,18 +515,11 @@ _default_transcriber: Transcriber | None = None
 def get_transcriber() -> Transcriber:
     """Process-wide transcriber, so the model is loaded at most once.
 
-    `ASR_BACKEND` picks the recogniser: "groq" for Groq's hosted large-v3,
-    anything else for the local model. For the local model, `ASR_PIPELINE`
-    selects between the paper's route and the single-shot call.
+    `ASR_PIPELINE` selects between the paper's route and the single-shot call.
     """
     global _default_transcriber
     if _default_transcriber is None:
-        settings = get_settings()
-        if (settings.asr_backend or "").strip().lower() == "groq":
-            from app.asr.groq_transcriber import GroqTranscriber
-
-            _default_transcriber = GroqTranscriber()
-        elif settings.asr_pipeline == "direct":
+        if get_settings().asr_pipeline == "direct":
             _default_transcriber = FasterWhisperTranscriber()
         else:
             _default_transcriber = LNTTranscriber()

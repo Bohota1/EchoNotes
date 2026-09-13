@@ -11,7 +11,13 @@
  */
 
 export type NoteType = "academic" | "brainstorm" | "todo";
-export type EntityKind = "person" | "date" | "deadline" | "task" | "key_phrase";
+export type EntityKind =
+  | "person"
+  | "date"
+  | "deadline"
+  | "task"
+  | "key_phrase"
+  | "time";
 
 
 
@@ -80,6 +86,13 @@ export interface CaptureResponse {
   created_at: string;
   transcription: Transcription;
   understanding: Understanding | null;
+  /**
+   * A sentence to speak about a reminder this note triggered: a confirmation
+   * once one is saved, or a follow-up question when the note mentioned an
+   * event ("I have a meeting...") but left out its date or time. Null for an
+   * ordinary note.
+   */
+  reminder_prompt: string | null;
 }
 
 export interface NoteSummary {

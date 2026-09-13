@@ -4,6 +4,7 @@
     POST   /api/v1/reminders             create one directly
     GET    /api/v1/reminders/due         what is due now
     GET    /api/v1/reminders/upcoming    what is due within a window
+    GET    /api/v1/reminders/alerts/due-soon   what to announce by voice now
     GET    /api/v1/reminders/{id}        one reminder
     PATCH  /api/v1/reminders/{id}        edit title, due date or status
     POST   /api/v1/reminders/{id}/done   mark done
@@ -98,6 +99,30 @@ def upcoming(
 ):
     service = ReminderService(db)
     return _list_response(service, service.upcoming(within_hours=within_hours), within_hours)
+
+
+@router.get(
+    "/alerts/due-soon",
+    response_model=ReminderListOut,
+    summary="Reminders due soon, not yet announced by voice",
+)
+def due_soon(
+    lead_minutes: int = Query(default=None, ge=1, le=24 * 60),
+    db: Session = Depends(get_db),
+):
+    """What the voice console should speak right now.
+
+    Each reminder returned here is marked announced (see
+    `ReminderService.due_soon`), so a client polling this on a timer hears
+    each one exactly once - the reminder still shows up in `/upcoming` for as
+    long as it is pending, this endpoint only tracks what has been *spoken*.
+    """
+    settings = get_settings()
+    lead = lead_minutes if lead_minutes is not None else settings.reminder_alert_lead_minutes
+    service = ReminderService(db)
+    reminders = service.due_soon(lead_minutes=lead)
+    db.commit()
+    return _list_response(service, reminders, max(1, lead // 60))
 
 
 @router.get(
