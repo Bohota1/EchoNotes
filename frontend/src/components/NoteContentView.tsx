@@ -30,6 +30,10 @@ interface Props {
 export function NoteContentView({ noteId }: Props) {
   const { announce } = useAnnouncer();
 
+
+
+
+  
   const [content, setContent] = useState<NoteContent | null>(null);
   const [noContent, setNoContent] = useState(false);
   const [error, setError] = useState<string | null>(null);
