@@ -250,7 +250,9 @@ def ask_stop(
             detail=f"could not transcribe the question: {exc}",
         ) from exc
 
-    question = correct_transcript_safe(transcription.text, kind="question").strip()
+    question = correct_transcript_safe(
+        transcription.text, kind="question", unclear=transcription.unclear_passages()
+    ).strip()
 
     if not question:
         # Silence, or speech the recogniser could not make out. Said plainly
