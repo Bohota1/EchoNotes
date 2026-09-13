@@ -19,6 +19,7 @@ import { ApiError, errorMessage, getNoteContent, saveNoteEdit } from "@/api/clie
 import { SpeakButton } from "@/components/SpeakButton";
 import type { NoteContent } from "@/types";
 
+
 interface Props {
   noteId: string;
 }
