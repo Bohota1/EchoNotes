@@ -182,3 +182,50 @@ class TestTypography:
         fake_llm(REPAIRED.replace("still works", "still‑works"))
         result = correct_transcript(ORIGINAL)
         assert all(ord(c) < 128 for c in result.text)
+
+
+class RecordingClient(FakeClient):
+    """A FakeClient that also keeps what it was asked."""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self.prompts: list[tuple[str, str]] = []
+
+    def complete(self, prompt, **kwargs):
+        self.prompts.append((prompt, kwargs.get("system", "")))
+        return super().complete(prompt, **kwargs)
+
+
+class TestUnclearPassages:
+    """The recogniser knows which stretches it was unsure of. Naming them points
+    the model at the likely mishearings instead of the whole note."""
+
+    @pytest.fixture
+    def recording_llm(self, monkeypatch):
+        client = RecordingClient(REPAIRED)
+        monkeypatch.setattr("app.llm.get_llm_client", lambda: client)
+        return client
+
+    def test_unclear_passages_are_named_to_the_model(self, recording_llm):
+        correct_transcript(ORIGINAL, unclear=["something breaks, the system steelworks."])
+        prompt, _ = recording_llm.prompts[0]
+        assert "the system steelworks." in prompt
+        assert "least confident" in prompt
+
+    def test_no_unclear_passages_means_no_hint(self, recording_llm):
+        correct_transcript(ORIGINAL)
+        prompt, _ = recording_llm.prompts[0]
+        assert "least confident" not in prompt
+
+    def test_the_model_is_told_not_to_fill_gaps(self, recording_llm):
+        """The tempting failure: a dropped phrase looks obvious from context, and
+        restoring it would be inventing words the user may not have said."""
+        correct_transcript(ORIGINAL)
+        _, system = recording_llm.prompts[0]
+        assert "incomplete phrase stays incomplete" in system
+
+    def test_the_safe_wrapper_forwards_them(self, recording_llm):
+        correct_transcript_safe(ORIGINAL, unclear=["the system steelworks"])
+        prompt, _ = recording_llm.prompts[0]
+        assert "the system steelworks" in prompt
+
