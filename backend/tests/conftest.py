@@ -30,6 +30,11 @@ os.environ["CAPTURE_SOURCE"] = "dummy"
 os.environ["DUMMY_AUDIO_PATH"] = str(_FIXTURE_WAV)
 os.environ["LLM_PROVIDER"] = "null"
 os.environ["ANTHROPIC_API_KEY"] = ""
+# Speech to text stays local and offline. A developer's .env may set
+# ASR_BACKEND=groq with a real key, and without these any test reaching the
+# default transcriber would upload audio to Groq.
+os.environ["ASR_BACKEND"] = "faster_whisper"
+os.environ["GROQ_API_KEY"] = ""
 
 # Phase 4 (Team Member 3). The in-memory vector store keeps the suite fast and
 # hermetic: no Chroma client to build (~1s), nothing written to disk, no state
