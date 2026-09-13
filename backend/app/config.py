@@ -112,7 +112,39 @@ class Settings(BaseSettings):
     lda_top_terms: int = 10
 
     # ---- Speech to text (Phase 1) ----
-    asr_backend: str = "faster_whisper"
+    # Which recogniser runs. "faster_whisper" is local (the model below);
+    # "groq" sends the recording to Groq's hosted Whisper large-v3 using
+    # GROQ_API_KEY - see app/asr/groq_transcriber.py.
+    #
+    # Measured on a 40-second note with a quiet stretch, scored against what
+    # was actually said (53 words): local "small" got 19-22 wrong under every
+    # setting tried; Groq large-v3 got 17 wrong, and 14 on loudness-evened
+    # audio, in about 1 second instead of 11. On three cleaner recordings it
+    # got 2 of 31 wrong where "small" had stored "our system", "given by" and
+    # "steelworks". The trade: the audio leaves the machine, and it needs a
+    # network connection (see asr_fallback_to_local).
+    #
+    # Local stays the default so nobody's audio goes to a cloud service
+    # without choosing it: set ASR_BACKEND=groq to opt in.
+    asr_backend: str = "faster_whisper"  # faster_whisper | groq
+    groq_asr_model: str = "whisper-large-v3"
+    # Evens out loudness before upload (ffmpeg's EBU R128 loudnorm). Measured
+    # with Groq: 17 -> 14 words wrong on a recording with a quiet stretch, and
+    # identical output on three recordings without one. A heavier dynamic
+    # normaliser (dynaudnorm) made the same recording worse (20). This is a
+    # gentler filter than the compressor in app.audio.normalization that hurt
+    # the local model, and it only runs on the Groq path. Skipped when ffmpeg
+    # is not installed.
+    groq_asr_loudnorm: bool = True
+    groq_asr_loudnorm_filter: str = "loudnorm=I=-20:TP=-2:LRA=7"
+    # The vocabulary prompt (WHISPER_INITIAL_PROMPT) steers large-v3 more than
+    # it helps it - measured 18 wrong with it, 17 without. Off on this path.
+    groq_asr_use_prompt: bool = False
+    groq_asr_timeout_seconds: float = 60.0
+    # When Groq cannot be used - no key, no network, a rate limit, a recording
+    # over the 25 MB upload cap - transcribe locally instead. A slower, less
+    # accurate note beats a lost one.
+    asr_fallback_to_local: bool = True
     # "base" mishears technical vocabulary badly - measured: "linked list" ->
     # "lengthless", "computer science" -> "computer size", "means planning how"
     # -> "needs flattening powers of". "small" fixes those and is the default
@@ -229,6 +261,14 @@ class Settings(BaseSettings):
     # search after the wrong thing - measured: "What is system design" heard as
     # "Various system design".
     transcript_correction_min_words_question: int = 2
+    # Segments below this avg_logprob are named to the LLM as the passages where
+    # a misheard word most likely is, so it checks those words against the
+    # sentence instead of reading the whole note with equal suspicion.
+    # Measured on Groq large-v3: the segment holding the errors scored -0.78,
+    # clean segments -0.34 to -0.36. This only points the model somewhere; the
+    # plausibility guards on what it may change are unchanged.
+    transcript_correction_unclear_logprob: float = -0.5
+    transcript_correction_max_unclear: int = 6
 
     # ---- LLM abstraction (Phase 2) ----
     # The pipeline works with no key at all: rules run first and the LLM is
