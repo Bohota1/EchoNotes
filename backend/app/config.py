@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # headroom described in `live.py`'s docstring without adding noticeable
     # start/stop latency.
     capture_blocksize: int = 8000
+    # How long a live recording keeps listening after it is told to stop, before
+    # the stream closes. Audio arrives in whole blocks of `capture_blocksize`
+    # frames - half a second at the default - and closing the stream discards
+    # the block still being filled, which is the end of whatever was said as
+    # Enter was pressed. Measured: of the last 25 recordings, the two that ended
+    # mid-sound were both questions, and one lost enough of "interview" to come
+    # back as "English". Must be longer than one block.
+    capture_stop_tail_seconds: float = 0.7
 
     # ---- LNT audio pipeline (Phase 1, paper Section 3.3) ----
     # Normalisation target and the silence-based chunking `app/audio/chunking.py`
