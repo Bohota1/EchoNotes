@@ -232,3 +232,67 @@ class TestTheEmptyAnswer:
 
         result = SimpleNamespace(query="English", filter_description="")
         assert _empty_answer(Intent.ASK, result).spoken == "I don't have any notes about English."
+
+
+# ---------------------------------------------------------------------------
+# a question is handled like a note, plus context
+# ---------------------------------------------------------------------------
+
+
+class TestQuestionsAreHandledLikeNotes:
+    def test_a_question_gets_the_same_correction_as_a_note(self, monkeypatch):
+        seen = {}
+
+        def record(text, **kwargs):
+            seen.update(kwargs)
+            return text
+
+        monkeypatch.setattr("app.nlp.correction.correct_transcript_safe", record)
+        retrieval._heard_question(heard("Do I have any notes related to interview?", -0.7))
+        assert seen.get("kind", "note") == "note", "a question-specific rewrite is still used"
+
+
+class TestQuestionsGetContext:
+    @pytest.fixture
+    def mic(self, monkeypatch, fixture_wav):
+        from app.capture import live
+        from app.capture.sources import DummyCaptureSource
+
+        recorder = SimpleNamespace(capture_id="fake")
+        recorder.start = lambda: "fake"
+        recorder.stop = lambda: DummyCaptureSource(fixture_wav).capture()
+        monkeypatch.setattr(live, "get_live_recorder", lambda: recorder)
+        return recorder
+
+    def test_a_spoken_question_is_transcribed_with_the_question_prompt(
+        self, client, fake_transcriber, mic
+    ):
+        fake_transcriber.text = "Do I have any notes related to interview?"
+        client.post("/api/v1/retrieval/ask/start")
+        assert client.post("/api/v1/retrieval/ask/stop").status_code == 200
+        assert fake_transcriber.prompts[-1] == get_settings().question_asr_prompt
+
+    def test_a_note_is_transcribed_without_it(self, client, fake_transcriber):
+        """A note carries its own context; priming it with question phrasing
+        would only steer a lecture toward "Do I have notes on"."""
+        assert client.post("/api/v1/trigger", json={}).status_code in (200, 201)
+        assert fake_transcriber.prompts[-1] is None
+
+    def test_the_local_whole_file_path_uses_the_prompt(self, tmp_path):
+        from app.asr.transcriber import LNTTranscriber
+
+        sent = []
+
+        class FakeModel:
+            def transcribe(self, path, **kwargs):
+                sent.append(kwargs.get("initial_prompt"))
+                segment = SimpleNamespace(start=0.0, end=1.0, text="hello there",
+                                          avg_logprob=-0.2, no_speech_prob=0.01)
+                return [segment], SimpleNamespace(language_probability=1.0, duration=1.0)
+
+        audio = tmp_path / "q.wav"
+        audio.write_bytes(b"")
+        LNTTranscriber()._transcribe_whole(
+            FakeModel(), audio, audio, "en", "transcribe", prompt="Questions about my notes."
+        )
+        assert sent == ["Questions about my notes."]
