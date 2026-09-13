@@ -3,7 +3,8 @@
  *
  *   Space   record a note (press to start, press again to stop)
  *   Shift   open a conversation, and press again to end it
- *   Enter   ask a question — inside a conversation if one is open
+ *   Enter   ask a question — inside a conversation if one is open. The
+ *           question as heard is read back before its answer.
  *
  * **No other key does anything.** Tab, Escape, arrows, letters, Backspace -
  * all swallowed. A person who cannot see the page cannot tell what an
@@ -88,6 +89,12 @@ interface Props {
    * happened.
    */
   autoSpeak?: boolean;
+}
+
+/** End a sentence with punctuation, so speech pauses before what follows. */
+function withStop(text: string): string {
+  const trimmed = text.trim();
+  return /[.?!]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /** Held with one of these, a key is a browser or system shortcut. */
@@ -217,10 +224,17 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
       if (sessionRef.current) {
         setExchanges((prev) => [...prev, { question: asked, answer: result.spoken }]);
       }
-      // `spoken` is always safe to read aloud, including when ok is false —
-      // so there is no error branch to write here. It is shown in the answer
-      // block below, so the status line only reports that it arrived.
-      say(result.spoken, { status: "Answer ready." });
+      // The question is read back before its answer, every time. Without it,
+      // someone who cannot see the screen cannot tell "you have no notes about
+      // English" from "I misheard you" - hearing what was understood is how
+      // they know whether to trust the answer that follows.
+      //
+      // `spoken` is always safe to read aloud, including when ok is false, so
+      // there is no error branch here. Both are shown below, so the status
+      // line only reports that the answer arrived.
+      say(asked ? `I heard: ${withStop(asked)} ${result.spoken}` : result.spoken, {
+        status: "Answer ready.",
+      });
     } catch (err) {
       setError((err as Error).message);
       say(`I could not answer that. ${(err as Error).message}`);
