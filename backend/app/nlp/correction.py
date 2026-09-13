@@ -181,7 +181,9 @@ def correct_transcript(
 
     `unclear` is the passages the recogniser was least sure of (see
     `TranscriptionResult.unclear_passages`). They tell the model where to
-    look; they do not loosen what it is allowed to change.
+    look; they do not loosen what it is allowed to change. For a question,
+    an empty list means the recogniser was sure of every word, and the
+    question is left exactly as heard.
     """
     settings = get_settings()
     original = (text or "").strip()
@@ -204,6 +206,19 @@ def correct_transcript(
         return CorrectionResult(text=text, changed=False, method="skipped",
                                 reason="too short to correct safely")
 
+    if kind == "question" and unclear is not None and not any(
+        p and p.strip() for p in unclear
+    ):
+        # The recogniser was sure of every word. A question is short, so there
+        # is no surrounding meaning to overrule a confident hearing with, and
+        # correcting anyway only invites the model to improve it - measured on
+        # confident transcripts: "notes related to English" became "notes
+        # related to linked list", and "Read the whole note" became "What is
+        # the whole note?". `unclear=None` means the caller has no confidence
+        # data at all, and keeps the previous behaviour.
+        return CorrectionResult(text=text, changed=False, method="skipped",
+                                reason="recogniser was confident")
+
     from app.llm import get_llm_client
 
     client = get_llm_client()
@@ -214,7 +229,11 @@ def correct_transcript(
     # The vocabulary hint that primes Whisper is just as useful here: it tells
     # the model which domain the mishearings will come from.
     hint = ""
-    if settings.whisper_initial_prompt:
+    # The vocabulary hint describes lectures. A question is about whatever the
+    # user's notes happen to hold, and handed a list of computer-science terms
+    # the model swaps a word it cannot place for one of them - measured: "notes
+    # related to English" became "notes related to linked list".
+    if settings.whisper_initial_prompt and kind != "question":
         hint = f"Context: {settings.whisper_initial_prompt}\n\n"
 
     if kind == "question":
@@ -226,7 +245,9 @@ def correct_transcript(
             "The text is a short spoken question the user asked about their own "
             "notes, not a lecture note. It should read as a question. Recogniser "
             'errors at the start of a question are common: "Various" or "Word is" '
-            'for "What is", "Do I" for "Does", and similar.\n\n'
+            'for "What is", "Do I" for "Does", and similar. A request such as '
+            '"Read my notes" or "Read the whole note" is not a question: leave it '
+            "a request.\n\n"
         )
 
     passages = [p.strip() for p in (unclear or []) if p and p.strip()]
