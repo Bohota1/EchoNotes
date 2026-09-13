@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from app.config import get_settings
@@ -51,6 +52,7 @@ You must NOT:
 - reword, rephrase or improve anything that is merely clumsy
 - reorder, summarise, shorten or expand
 - add any information that is not already there
+- fill in words you think the recogniser missed: an incomplete phrase stays incomplete
 - fix grammar the speaker actually used
 - change punctuation, hyphenation or capitalisation for style
 - use typographic characters: plain ASCII only, never curly quotes, en dashes \
@@ -168,12 +170,18 @@ def _is_plausible_correction(original: str, corrected: str) -> tuple[bool, str]:
     return True, ""
 
 
-def correct_transcript(text: str, *, kind: str = "note") -> CorrectionResult:
+def correct_transcript(
+    text: str, *, kind: str = "note", unclear: Sequence[str] | None = None
+) -> CorrectionResult:
     """Ask the LLM to repair recognition errors. Never raises.
 
     `kind` is "note" or "question". A question uses a much lower length
     threshold and is told it is a question, because a four-word query is normal
     and a mishearing in it sends the search after the wrong thing.
+
+    `unclear` is the passages the recogniser was least sure of (see
+    `TranscriptionResult.unclear_passages`). They tell the model where to
+    look; they do not loosen what it is allowed to change.
     """
     settings = get_settings()
     original = (text or "").strip()
@@ -221,6 +229,20 @@ def correct_transcript(text: str, *, kind: str = "note") -> CorrectionResult:
             'for "What is", "Do I" for "Does", and similar.\n\n'
         )
 
+    passages = [p.strip() for p in (unclear or []) if p and p.strip()]
+    if passages:
+        # Named rather than left for the model to find. Told nothing, it reads
+        # the whole note with equal suspicion, and the words it "fixes" are as
+        # likely to be ones that were heard correctly.
+        listed = "\n".join(
+            f'- "{p}"' for p in passages[: settings.transcript_correction_max_unclear]
+        )
+        hint += (
+            "The recogniser was least confident in these passages, so a misheard "
+            "word is most likely inside them. Check each word there against the "
+            "meaning of the sentence around it:\n" + listed + "\n\n"
+        )
+
     try:
         response = client.complete(
             PROMPT.format(hint=hint, text=original),
@@ -250,10 +272,12 @@ def correct_transcript(text: str, *, kind: str = "note") -> CorrectionResult:
     return CorrectionResult(text=corrected, changed=True, method="llm")
 
 
-def correct_transcript_safe(text: str, *, kind: str = "note") -> str:
+def correct_transcript_safe(
+    text: str, *, kind: str = "note", unclear: Sequence[str] | None = None
+) -> str:
     """Just the text, for callers that do not care why. Never raises."""
     try:
-        return correct_transcript(text, kind=kind).text
+        return correct_transcript(text, kind=kind, unclear=unclear).text
     except Exception:
         logger.exception("transcript correction failed; keeping the transcript as-is")
         return text
