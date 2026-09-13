@@ -62,6 +62,11 @@ def health() -> dict:
         "capture_source": settings.capture_source,
         "capture_available": available,
         "capture_detail": detail,
-        "asr_model": settings.whisper_model,
+        "asr_backend": settings.asr_backend,
+        "asr_model": (
+            settings.groq_asr_model
+            if settings.asr_backend == "groq"
+            else settings.whisper_model
+        ),
         "llm_available": get_llm_client().available,
     }
