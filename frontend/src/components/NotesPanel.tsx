@@ -23,6 +23,10 @@ function formatWhen(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
+
+
+
+
 interface Props {
   /** Changes whenever a capture completes, to pull the new note in. */
   refreshKey: number;
