@@ -20,8 +20,8 @@ requirement, not a retrofit. Idea11y's design goals are the source for most of w
 
 ## The voice console
 
-Three keys do everything, and every result is spoken. This is the primary interface; the panels
-below it on the page are the same functionality for sighted use.
+Three keys do everything, and every result is spoken. It is the only way to record a note or ask
+a question; the panels below it on the page only show what is stored.
 
 | Key | Action |
 |---|---|
