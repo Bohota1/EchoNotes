@@ -18,6 +18,10 @@ from app.config import get_settings
 from app.core.errors import AudioCaptureError, TranscriptionError
 from app.db.session import get_db
 from app.pipeline.capture_pipeline import run_capture, run_understanding_on_text
+from app.reminders.clarify import (
+    handle_reminder_clarification_safe,
+    suppress_clarification_note,
+)
 from app.schemas.capture import (
     CaptureResponse,
     CaptureSourceOut,
@@ -65,9 +69,26 @@ def trigger(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
 
+    # Additive: does not touch anything `run_capture` already stored. Reads
+    # the entities that step just wrote, and asks the one question or saves
+    # the one reminder an "I have a meeting..." note implies - see
+    # app/reminders/clarify.py.
+    clarification = handle_reminder_clarification_safe(db, note)
+
+    if clarification.spoken is not None:
+        # This capture was the clarification machinery talking to itself (an
+        # event mention, or an answer to one of its own questions) - build
+        # the response first, since `note`'s ORM attributes are unusable the
+        # moment its row is gone, then remove it so it never shows up as a
+        # stray fragment in the Notes list.
+        response = capture_response(note, reminder_prompt=clarification.spoken)
+        suppress_clarification_note(db, note)
+        db.commit()
+        return response
+
     db.commit()
     db.refresh(note)
-    return capture_response(note)
+    return capture_response(note, reminder_prompt=clarification.spoken)
 
 
 @router.get(
@@ -217,9 +238,17 @@ def stop_recording(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
 
+    clarification = handle_reminder_clarification_safe(db, note)
+
+    if clarification.spoken is not None:
+        response = capture_response(note, reminder_prompt=clarification.spoken)
+        suppress_clarification_note(db, note)
+        db.commit()
+        return response
+
     db.commit()
     db.refresh(note)
-    return capture_response(note)
+    return capture_response(note, reminder_prompt=clarification.spoken)
 
 
 @router.post(
