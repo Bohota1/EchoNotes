@@ -128,7 +128,13 @@ def run_capture(
     # ("the system still works" -> "the system steelworks"). An LLM reasons
     # about meaning and repairs that. `raw_text` below stays the untouched
     # recogniser output, so the original is always recoverable.
-    corrected = correct_transcript_safe(transcription.text)
+    #
+    # The segments the recogniser was least sure of are named, so the model
+    # checks those words against the sentence rather than second-guessing
+    # the ones that were heard clearly.
+    corrected = correct_transcript_safe(
+        transcription.text, unclear=transcription.unclear_passages()
+    )
 
     # --- 4. clean ---------------------------------------------------------
     cleaned = clean_transcript(corrected)
