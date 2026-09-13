@@ -105,7 +105,9 @@ function isShortcut(event: KeyboardEvent): boolean {
 export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
   const [mode, setMode] = useState<Mode>("idle");
   const [status, setStatus] = useState(
-    "Press Space to record a note. Press Enter to ask a question. Press Shift to start a conversation.",
+    // The keycaps below say what each key does; this line says what is
+    // happening, so at rest it has nothing to add but that.
+    "Ready when you are.",
   );
   const [answer, setAnswer] = useState<VoiceQueryResponse | null>(null);
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
@@ -340,44 +342,39 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
 
   const recording = mode === "note" || mode === "question";
 
+  // One word for what EchoNotes is doing, shown beside the status sentence -
+  // the lamp's colour repeats it, never replaces it.
+  const phase =
+    mode === "note"
+      ? "recording"
+      : mode === "question"
+        ? "listening"
+        : mode === "working"
+          ? "working"
+          : sessionId
+            ? "conversation"
+            : "ready";
+  const phaseLabel = {
+    recording: "Recording",
+    listening: "Listening",
+    working: "Working",
+    conversation: "Conversation open",
+    ready: "Ready",
+  }[phase];
+
   return (
-    <section className="voice-console" aria-labelledby="voice-console-heading">
-      <h2 id="voice-console-heading">Voice</h2>
-
-      <p className="voice-console__keys">
-        <kbd>Space</kbd> records a note. <kbd>Shift</kbd> starts and ends a
-        conversation. <kbd>Enter</kbd> asks a question. No other key does
-        anything.
-      </p>
-
-      {/* The buttons mirror the keys rather than replacing them: a mouse or
-          touch user gets the same actions, and the labels say what the next
-          press will do. */}
-      <div className="voice-console__buttons">
-        <button
-          type="button"
-          onClick={() => (mode === "note" ? void finishNote() : void startNote())}
-          disabled={mode === "question" || mode === "working"}
-        >
-          {mode === "note" ? "Stop recording (Space)" : "Record a note (Space)"}
-        </button>
-        <button
-          type="button"
-          onClick={() => void toggleSession()}
-          disabled={mode !== "idle"}
-          aria-pressed={sessionId !== null}
-        >
-          {sessionId ? "End conversation (Shift)" : "Start a conversation (Shift)"}
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            mode === "question" ? void finishQuestion() : void startQuestion()
-          }
-          disabled={mode === "note" || mode === "working"}
-        >
-          {mode === "question" ? "Stop and answer (Enter)" : "Ask a question (Enter)"}
-        </button>
+    <section
+      id="voice"
+      className="voice-console"
+      data-phase={phase}
+      aria-labelledby="voice-console-heading"
+    >
+      <div className="voice-console__head">
+        <h2 id="voice-console-heading">Voice</h2>
+        <p className="voice-console__phase" aria-hidden="true">
+          <span className="voice-console__lamp" />
+          {phaseLabel}
+        </p>
       </div>
 
       <p
@@ -387,6 +384,67 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
       >
         {status}
       </p>
+
+      {/* The keycaps mirror the keys rather than replacing them, laid out where
+          the keys are on a keyboard: Shift on the left, the Space bar in the
+          middle, Enter on the right. A key that is doing something is shown
+          pressed in. Each keycap's accessible name is its action and its key -
+          the printed key legend is hidden from screen readers so the name is
+          not read twice. */}
+      <div className="keyboard" role="group" aria-label="The three keys">
+        <button
+          type="button"
+          className="keycap keycap--shift"
+          data-active={sessionId !== null ? "" : undefined}
+          onClick={() => void toggleSession()}
+          disabled={mode !== "idle"}
+          aria-pressed={sessionId !== null}
+        >
+          <span className="keycap__legend" aria-hidden="true">
+            Shift
+          </span>
+          <span className="keycap__action">
+            {sessionId ? "End conversation" : "Start a conversation"}
+          </span>
+          <span className="visually-hidden"> (Shift)</span>
+        </button>
+
+        <button
+          type="button"
+          className="keycap keycap--space"
+          data-active={mode === "note" ? "" : undefined}
+          onClick={() => (mode === "note" ? void finishNote() : void startNote())}
+          disabled={mode === "question" || mode === "working"}
+        >
+          <span className="keycap__legend" aria-hidden="true">
+            Space
+          </span>
+          <span className="keycap__action">
+            {mode === "note" ? "Stop recording" : "Record a note"}
+          </span>
+          <span className="visually-hidden"> (Space)</span>
+        </button>
+
+        <button
+          type="button"
+          className="keycap keycap--enter"
+          data-active={mode === "question" ? "" : undefined}
+          onClick={() =>
+            mode === "question" ? void finishQuestion() : void startQuestion()
+          }
+          disabled={mode === "note" || mode === "working"}
+        >
+          <span className="keycap__legend" aria-hidden="true">
+            Enter <span className="keycap__glyph">↵</span>
+          </span>
+          <span className="keycap__action">
+            {mode === "question" ? "Stop and answer" : "Ask a question"}
+          </span>
+          <span className="visually-hidden"> (Enter)</span>
+        </button>
+      </div>
+
+      <p className="voice-console__keys">No other key does anything.</p>
 
       {error && (
         <p className="voice-console__error" role="alert">
@@ -410,10 +468,10 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
                 <li key={index}>
                   {turn.question && (
                     <p className="voice-console__heard">
-                      <strong>You:</strong> {turn.question}
+                      <strong>You</strong> {turn.question}
                     </p>
                   )}
-                  <p>{turn.answer}</p>
+                  <p className="voice-console__reply">{turn.answer}</p>
                 </li>
               ))}
             </ol>
@@ -425,18 +483,19 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
         <div className="voice-console__answer">
           {typeof answer.data?.question === "string" && (
             <p className="voice-console__heard">
-              <strong>Heard:</strong> {answer.data.question}
+              <strong>Heard</strong> {answer.data.question}
             </p>
           )}
-          <p>{answer.spoken}</p>
+          <p className="voice-console__reply">{answer.spoken}</p>
         </div>
       )}
 
       {answer && answer.results.length > 0 && (
-        <ul className="voice-console__sources">
+        <ul className="voice-console__sources" aria-label="Notes this answer came from">
           {answer.results.map((note) => (
             <li key={note.note_id}>
-              {note.topic_name || "Note"} — {note.snippet.slice(0, 120)}
+              <span className="voice-console__source-topic">{note.topic_name || "Note"}</span>
+              {note.snippet.slice(0, 120)}
             </li>
           ))}
         </ul>

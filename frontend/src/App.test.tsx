@@ -1,32 +1,20 @@
 /**
- * Smoke test: the app mounts, renders its landmarks, and survives a dead
- * backend by saying so rather than crashing.
+ * Smoke tests for the page as it is: the landmarks, the three keys, the two
+ * settings, and a dead backend reported rather than crashing.
  *
- * `fetch` is stubbed, so this needs no running server.
+ * `fetch` is stubbed, so these need no running server.
  */
 
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-
-const SOURCES = [
-  { name: "dummy", available: true, detail: "replaying sample_capture.wav", is_default: true },
-  { name: "microphone", available: true, detail: "ready", is_default: false },
-];
 
 function stubFetch(handler: (url: string) => unknown) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      const body = handler(url);
+      const body = handler(String(input));
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -35,58 +23,48 @@ function stubFetch(handler: (url: string) => unknown) {
   );
 }
 
-const HEALTH = {
-  status: "ok",
-  capture_source: "dummy",
-  capture_available: true,
-  capture_detail: "replaying sample_capture.wav",
-  asr_model: "base",
-  llm_available: false,
-};
+function emptyBackend(url: string): unknown {
+  if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
+  return [];
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  delete document.documentElement.dataset.contrast;
+});
 
 afterEach(() => {
   // Vitest does not register testing-library's auto-cleanup unless `globals`
-  // is on, so without this each render stacks on the last and queries find
-  // duplicates.
+  // is on, so without this each render stacks on the last.
   cleanup();
   vi.unstubAllGlobals();
 });
 
 describe("App", () => {
-  it("renders every landmark heading", async () => {
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      return [];
-    });
-
+  it("renders every landmark heading", () => {
+    stubFetch(emptyBackend);
     render(<App />);
 
-    expect(
-      screen.getByRole("heading", { name: "EchoNotes", level: 1 }),
-    ).toBeDefined();
-    for (const name of [
-      "Capture",
-      "Ask your notes",
-      "Knowledge graph",
-      "Notes (0)",
-      "Reminders (0)",
-    ]) {
+    expect(screen.getByRole("heading", { name: "EchoNotes", level: 1 })).toBeDefined();
+    for (const name of ["Voice", "Knowledge graph", "Notes (0)", "Reminders (0)"]) {
       expect(screen.getByRole("heading", { name, level: 2 })).toBeDefined();
     }
+    expect(screen.getByRole("main")).toBeDefined();
+    expect(screen.getByRole("complementary", { name: "Reminders and notes" })).toBeDefined();
+  });
+
+  it("offers the three keys, named by what they do and which key does it", () => {
+    stubFetch(emptyBackend);
+    render(<App />);
+
+    expect(screen.getByRole("button", { name: "Record a note (Space)" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Start a conversation (Shift)" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Ask a question (Enter)" })).toBeDefined();
   });
 
   it("shows the knowledge graph's subjects, empty or not", async () => {
-    // NexaNota redesign: replaces the old Subject/Topic/Note hierarchy tree.
     const SUBJECTS = [{ id: "s1", name: "Operating Systems", is_unfiled: false, topic_count: 2 }];
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      if (url.includes("/graph/subjects")) return SUBJECTS;
-      return [];
-    });
+    stubFetch((url) => (url.includes("/graph/subjects") ? SUBJECTS : emptyBackend(url)));
 
     render(<App />);
 
@@ -97,7 +75,7 @@ describe("App", () => {
   });
 
   it("has a live region so nothing changes silently", () => {
-    stubFetch(() => HEALTH);
+    stubFetch(emptyBackend);
     render(<App />);
     // Screen-reader users cannot see a status change; it has to be announced.
     expect(screen.getByRole("status")).toBeDefined();
@@ -113,98 +91,34 @@ describe("App", () => {
 
     render(<App />);
 
-    // Each panel reports its own failure, so several alerts is correct -
-    // the user needs to know which part of the page is broken, not just that
-    // something is.
     await waitFor(() => {
       expect(screen.getAllByText(/Cannot reach the backend/).length).toBeGreaterThan(0);
     });
   });
 
-  it("warns that sample mode ignores the microphone", async () => {
-    // The backend defaults to the `dummy` source, which replays a fixture. If
-    // that is not said plainly, Record looks like it works while returning the
-    // same canned sentence every time.
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      return [];
-    });
-
+  it("switches to high contrast and remembers it", () => {
+    stubFetch(emptyBackend);
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getByText(/ignores your microphone/i)).toBeDefined();
-    });
-    expect(
-      screen.getByRole("button", { name: /play sample recording/i }),
-    ).toBeDefined();
+    const toggle = screen.getByRole("switch", { name: "High contrast" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(document.documentElement.dataset.contrast).toBe("standard");
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(document.documentElement.dataset.contrast).toBe("high");
+    expect(window.localStorage.getItem("echonotes.contrast")).toBe("high");
   });
 
-  it("offers start/stop on the microphone rather than a fixed length", async () => {
-    // Nobody knows in advance how long a thought takes, so the microphone gets
-    // a Start/Stop pair instead of a duration to pick up front.
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      return [];
-    });
-
+  it("starts in the contrast mode chosen last time", () => {
+    window.localStorage.setItem("echonotes.contrast", "high");
+    stubFetch(emptyBackend);
     render(<App />);
 
-    const select = await screen.findByLabelText(/recording from/i);
-    fireEvent.change(select, { target: { value: "microphone" } });
-
-    expect(screen.getByRole("button", { name: /start recording/i })).toBeDefined();
-    expect(screen.queryByLabelText(/record for/i)).toBeNull();
-  });
-
-  it("turns into a stop button once recording starts", async () => {
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/capture/start")) {
-        return {
-          recording: true,
-          capture_id: "abc",
-          elapsed_seconds: 0,
-          max_seconds: 300,
-          hit_limit: false,
-          spoken: "Recording.",
-        };
-      }
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      return [];
-    });
-
-    render(<App />);
-
-    const select = await screen.findByLabelText(/recording from/i);
-    fireEvent.change(select, { target: { value: "microphone" } });
-    fireEvent.click(screen.getByRole("button", { name: /start recording/i }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /stop recording/i })).toBeDefined();
-    });
-    // Discard has to be reachable too, or a misfired recording can only be
-    // ended by transcribing it.
-    expect(screen.getByRole("button", { name: /discard/i })).toBeDefined();
-    expect(screen.getByText(/Recording —/)).toBeDefined();
-  });
-
-  it("offers a voice-output control", async () => {
-    stubFetch((url) => {
-      if (url.includes("/health")) return HEALTH;
-      if (url.includes("/capture/sources")) return SOURCES;
-      if (url.includes("/reminders")) return { reminders: [], count: 0, spoken: "" };
-      return [];
-    });
-
-    render(<App />);
-    expect(
-      screen.getByRole("heading", { name: "Voice output", level: 2 }),
-    ).toBeDefined();
+    expect(screen.getByRole("switch", { name: "High contrast" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(document.documentElement.dataset.contrast).toBe("high");
   });
 });

@@ -1,61 +1,162 @@
 /*
- * Base styles.
+ * EchoNotes - visual design.
  *
- * EchoNotes' primary users are blind or low vision, so the visual layer serves two audiences:
- * low-vision users with usable sight, and sighted collaborators looking over a shoulder. That
- * means the rules below are requirements, not preferences.
+ * The primary users are blind or low vision, so the visual layer serves two
+ * audiences: low-vision users with usable sight, and sighted people looking
+ * over a shoulder. These rules are requirements, not preferences:
  *
- *   - Never remove focus outlines. :focus-visible is styled up, never off.
- *   - Text scales with rem so browser zoom and OS text size work.
- *   - Contrast at least 7:1 for body text (WCAG AAA), 4.5:1 for large text.
- *   - Respect prefers-reduced-motion; nothing animates that carries meaning.
- *   - Nothing is conveyed by colour alone: note type is a word, not just a hue.
- *   - .visually-hidden exposes text to screen readers without showing it.
+ *   - Focus outlines are styled up, never removed.
+ *   - Text is sized in rem, so browser zoom and OS text size work.
+ *   - Body text contrast is at least 7:1 (WCAG AAA) in every theme.
+ *   - Nothing is shown by colour alone: every state is also a word.
+ *   - Motion never carries meaning, and stops for prefers-reduced-motion.
+ *
+ * Three themes share one set of tokens:
+ *   light          default
+ *   dark           follows the operating system
+ *   high contrast  black, white and yellow at 125% text - [data-contrast="high"]
+ *
+ * Signature: the three voice keys drawn as keycaps, in the positions they have
+ * on a keyboard (Shift left, the Space bar centre, Enter right). A key that is
+ * doing something is shown pressed in.
  */
 
+/* ---------------------------------------------------------------------------
+ * Tokens
+ * -------------------------------------------------------------------------*/
+
 :root {
-  --bg: #ffffff;
-  --fg: #16181d;
-  --muted: #4a4f5a;
-  --border: #c7ccd6;
-  --accent: #0b4fd8;
-  --focus: #0b4fd8;
+  --paper: #f4f6fa;
+  --surface: #ffffff;
+  --ink: #0c1322;
+  --graphite: #414b5c;
+  --rule: #cdd3df;
+  --cobalt: #2340c8;
+  --cobalt-ink: #ffffff;
+  --cobalt-wash: #e8ecfb;
+  --signal: #c42b1c;
+  --signal-ink: #ffffff;
   --danger: #a3101a;
-  --recording: #a3101a;
-  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-size: 1.0625rem;
-  --line-height: 1.6;
+  --deck: #e3e7ef;
+  --keycap-edge: #b9c1cf;
+  --keycap-drop: 0 6px 0 #9ea8b9, 0 12px 22px rgb(12 19 34 / 0.1);
+  --keycap-drop-pressed: 0 1px 0 #9ea8b9, 0 3px 8px rgb(12 19 34 / 0.12);
+  --shadow-soft: 0 1px 2px rgb(12 19 34 / 0.05), 0 8px 24px rgb(12 19 34 / 0.05);
+  --focus: #2340c8;
+
+  --font-body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono", Consolas,
+    monospace;
+  --text-scale: 1;
+  --border-w: 1px;
+  --radius: 16px;
+  --radius-sm: 10px;
+
+  /* Names the component styles below were written against. */
+  --bg: var(--surface);
+  --fg: var(--ink);
+  --muted: var(--graphite);
+  --border: var(--rule);
+  --accent: var(--cobalt);
+  --recording: var(--signal);
+
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #101215;
-    --fg: #f2f4f8;
-    --muted: #b8bfcc;
-    --border: #3a414d;
-    --accent: #8ab4ff;
-    --focus: #8ab4ff;
-    --danger: #ff8a8a;
-    --recording: #ff8a8a;
+  :root:not([data-contrast="high"]) {
+    --paper: #0b0f17;
+    --surface: #131a26;
+    --ink: #eef2f8;
+    --graphite: #aeb8c7;
+    --rule: #2b3547;
+    --cobalt: #9db2ff;
+    --cobalt-ink: #0b0f17;
+    --cobalt-wash: #1a2442;
+    --signal: #ff6b5e;
+    --signal-ink: #1a0703;
+    --danger: #ff9a94;
+    --deck: #080b12;
+    --keycap-edge: #2f3a4e;
+    --keycap-drop: 0 6px 0 #03050a, 0 12px 22px rgb(0 0 0 / 0.45);
+    --keycap-drop-pressed: 0 1px 0 #03050a, 0 3px 8px rgb(0 0 0 / 0.4);
+    --shadow-soft: none;
+    --focus: #9db2ff;
+    color-scheme: dark;
   }
 }
 
-* {
+/* Low vision: the black, white and yellow many readers already set on their
+   own devices, larger text, heavier lines, no shadows or tints to lose. */
+:root[data-contrast="high"] {
+  --paper: #000000;
+  --surface: #000000;
+  --ink: #ffffff;
+  --graphite: #ffffff;
+  --rule: #ffffff;
+  --cobalt: #ffe14d;
+  --cobalt-ink: #000000;
+  --cobalt-wash: #000000;
+  --signal: #ffe14d;
+  --signal-ink: #000000;
+  --danger: #ffe14d;
+  --deck: #000000;
+  --keycap-edge: #ffffff;
+  --keycap-drop: none;
+  --keycap-drop-pressed: none;
+  --shadow-soft: none;
+  --focus: #ffe14d;
+  --text-scale: 1.25;
+  --border-w: 3px;
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+ * Base
+ * -------------------------------------------------------------------------*/
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html {
+  font-size: calc(100% * var(--text-scale));
 }
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--paper);
+  color: var(--ink);
   font-family: var(--font-body);
-  font-size: var(--font-size);
-  line-height: var(--line-height);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  line-height: 1.2;
+}
+
+a {
+  color: var(--cobalt);
+  text-underline-offset: 0.2em;
 }
 
 :focus-visible {
   outline: 3px solid var(--focus);
-  outline-offset: 2px;
+  outline-offset: 3px;
+}
+:root[data-contrast="high"] :focus-visible {
+  outline-width: 4px;
+  outline-offset: 4px;
 }
 
 .visually-hidden {
@@ -70,18 +171,19 @@ body {
   border: 0;
 }
 
-/* Visible once focused, so a keyboard user can jump past the header. */
 .skip-link {
   position: absolute;
   left: -9999px;
 }
 .skip-link:focus {
-  left: 0.5rem;
-  top: 0.5rem;
+  left: 1rem;
+  top: 1rem;
   z-index: 100;
-  padding: 0.5rem 0.75rem;
-  background: var(--accent);
-  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--cobalt);
+  color: var(--cobalt-ink);
+  font-weight: 700;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -89,152 +191,733 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
 
 /* ---------------------------------------------------------------------------
- * Application layout.
+ * Shell: masthead, stage, rail
  * -------------------------------------------------------------------------*/
 
-.app-header {
-  padding: 1.5rem 1rem 0.5rem;
-  max-width: 70rem;
+.shell {
+  max-width: 90rem;
   margin: 0 auto;
+  padding: 0 clamp(1rem, 3vw, 2.75rem) 4rem;
 }
-.app-header h1 {
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  padding: 1.4rem 0 1.25rem;
+  border-bottom: var(--border-w) solid var(--rule);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+/* "EN" in braille, as a mark. Decorative for sight; hidden from screen readers. */
+.brand__mark {
+  display: inline-flex;
+  gap: 0.34rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 12px;
+  background: var(--ink);
+}
+.braille-cell {
+  display: grid;
+  grid-template-rows: repeat(3, 0.42rem);
+  grid-auto-columns: 0.42rem;
+  grid-auto-flow: column;
+  gap: 0.2rem;
+}
+.braille-dot {
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--paper) 16%, transparent);
+}
+.braille-dot[data-raised] {
+  background: var(--paper);
+}
+
+.brand__name {
   margin: 0;
   font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.brand__tagline {
+  margin: 0.25rem 0 0;
+  color: var(--graphite);
+  font-size: 0.95rem;
 }
 
-main {
-  max-width: 70rem;
-  margin: 0 auto;
-  padding: 0 1rem 3rem;
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 27rem);
+  gap: clamp(1.5rem, 3vw, 2.75rem);
+  align-items: start;
+  padding-top: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.stage {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 2.25rem;
+  min-width: 0;
 }
+
+.rail {
+  position: sticky;
+  top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-height: calc(100vh - 2.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 0.25rem 0.25rem 0;
+}
+
+@media (max-width: 64rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Switches (read aloud, high contrast)
+ * -------------------------------------------------------------------------*/
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.9rem 0.35rem 0.45rem;
+  border: var(--border-w) solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+}
+.switch:hover:not(:disabled) {
+  border-color: var(--cobalt);
+}
+.switch__track {
+  position: relative;
+  flex: none;
+  width: 2.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--rule);
+}
+.switch__thumb {
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(12 19 34 / 0.3);
+  transition: transform 160ms ease;
+}
+.switch[aria-checked="true"] .switch__track {
+  background: var(--cobalt);
+}
+.switch[aria-checked="true"] .switch__thumb {
+  transform: translateX(1rem);
+}
+.switch__state {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+:root[data-contrast="high"] .switch__track {
+  background: #000;
+  box-shadow: inset 0 0 0 2px #fff;
+}
+:root[data-contrast="high"] .switch__thumb {
+  background: #fff;
+  box-shadow: none;
+}
+:root[data-contrast="high"] .switch[aria-checked="true"] .switch__track {
+  background: var(--cobalt);
+  box-shadow: none;
+}
+:root[data-contrast="high"] .switch[aria-checked="true"] .switch__thumb {
+  background: #000;
+}
+
+/* ---------------------------------------------------------------------------
+ * The voice console
+ * -------------------------------------------------------------------------*/
+
+.voice-console {
+  /* Sized by the space the console actually has beside the rail, not by the
+     window - so the keycaps fit whether the rail is beside them or below. */
+  container: voice / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.voice-console__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.voice-console__head h2 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+
+/* What EchoNotes is doing, as a word with a lamp beside it. */
+.voice-console__phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.35rem 0.85rem 0.35rem 0.7rem;
+  border: var(--border-w) solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.voice-console__lamp {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--graphite);
+}
+.voice-console[data-phase="recording"] .voice-console__phase {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+.voice-console[data-phase="recording"] .voice-console__lamp {
+  background: var(--signal);
+  animation: lamp-pulse 1.4s ease-in-out infinite;
+}
+.voice-console[data-phase="listening"] .voice-console__phase {
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+}
+.voice-console[data-phase="listening"] .voice-console__lamp,
+.voice-console[data-phase="working"] .voice-console__lamp {
+  background: var(--cobalt);
+  animation: lamp-pulse 1.4s ease-in-out infinite;
+}
+.voice-console[data-phase="conversation"] .voice-console__lamp {
+  background: var(--ink);
+}
+
+@keyframes lamp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* The status sentence: the largest type on the page, because it is the one
+   thing a low-vision user most needs to read. */
+.voice-console__status {
+  margin: 0;
+  max-width: 34ch;
+  font-size: clamp(1.35rem, 4.1cqi, 2.3rem);
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* --- keycaps ------------------------------------------------------------ */
+
+.keyboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 2.5fr) minmax(0, 1.15fr);
+  gap: clamp(0.6rem, 1.4vw, 1rem);
+  padding: clamp(0.9rem, 2.2vw, 1.4rem) clamp(0.9rem, 2.2vw, 1.4rem)
+    calc(clamp(0.9rem, 2.2vw, 1.4rem) + 6px);
+  border-radius: 24px;
+  background: var(--deck);
+}
+:root[data-contrast="high"] .keyboard {
+  box-shadow: inset 0 0 0 var(--border-w) var(--rule);
+}
+
+.keycap {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  min-height: 9.5rem;
+  padding: 1rem 1.15rem 1.15rem;
+  border: var(--border-w) solid var(--keycap-edge);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: var(--keycap-drop);
+  transform: translateY(0);
+  /* Only the press moves. Colours change at once: a low-vision reader who
+     switches theme, or starts recording, should never see a grey half-way
+     state between two readable ones. */
+  transition:
+    transform 110ms ease,
+    box-shadow 110ms ease;
+}
+.keycap:hover:not(:disabled) {
+  border-color: var(--cobalt);
+}
+.keycap:active:not(:disabled),
+.keycap[data-active] {
+  transform: translateY(5px);
+  box-shadow: var(--keycap-drop-pressed);
+}
+.keycap:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+:root[data-contrast="high"] .keycap:disabled {
+  opacity: 1;
+  border-style: dashed;
+}
+
+.keycap__legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+.keycap__glyph {
+  /* The return arrow is taller than the letters; without this the Enter
+     legend sits lower than Shift's and Space's. */
+  font-size: 1.05rem;
+  line-height: 1;
+  letter-spacing: 0;
+}
+.keycap__legend {
+  line-height: 1;
+  min-height: 1.05rem;
+}
+.keycap__action {
+  /* Scales with the key it is printed on: the Space bar's label is the
+     largest, and "conversation" still fits on a narrow Shift key. */
+  font-size: clamp(1.05rem, 12.5cqi, 1.85rem);
+  overflow-wrap: break-word;
+  hyphens: auto;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+}
+
+/* Recording: the Space bar turns signal red and breathes. */
+.keycap--space[data-active] {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.keycap--space[data-active]::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 2px solid var(--signal);
+  border-radius: 22px;
+  animation: key-breathe 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+/* Listening for a question. */
+.keycap--enter[data-active] {
+  border-color: var(--cobalt);
+  background: var(--cobalt);
+  color: var(--cobalt-ink);
+}
+/* A conversation stays open, so Shift stays down. */
+.keycap--shift[data-active] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+.keycap[data-active] .keycap__legend {
+  color: currentColor;
+}
+
+@keyframes key-breathe {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.15;
+    transform: scale(1.015);
+  }
+}
+
+/* Medium: the Space bar is still the widest key, but gives up width so the
+   side keys can hold their labels. */
+@container voice (max-width: 52rem) {
+  .keyboard {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+}
+
+/* Narrow: the Space bar on its own row, Shift and Enter beneath it. */
+@container voice (max-width: 40rem) {
+  .keyboard {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .keycap--space {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+  .keycap {
+    min-height: 7rem;
+  }
+}
+
+.voice-console__keys {
+  margin: -0.5rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--graphite);
+}
+
+.voice-console__error {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: var(--border-w) solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* --- answers and conversations ------------------------------------------ */
+
+.voice-console__answer,
+.voice-console__conversation {
+  padding: 1.35rem 1.5rem;
+  border: var(--border-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+/* An open conversation is a mode, and a mode the user cannot see is a mode
+   they will forget they are in - so it is framed in ink, not grey. */
+.voice-console__conversation {
+  border: 2px solid var(--ink);
+}
+:root[data-contrast="high"] .voice-console__conversation {
+  border-width: var(--border-w);
+}
+
+.voice-console__conversation h3 {
+  margin: 0 0 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.voice-console__turn-count {
+  font-weight: 500;
+  color: var(--graphite);
+}
+.voice-console__conversation > p {
+  margin: 0;
+  color: var(--graphite);
+}
+
+.voice-console__turns {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.voice-console__turns li + li {
+  padding-top: 1.1rem;
+  border-top: var(--border-w) solid var(--rule);
+}
+
+.voice-console__heard {
+  margin: 0 0 0.45rem;
+  color: var(--graphite);
+  font-size: 1rem;
+}
+.voice-console__heard strong {
+  margin-right: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.voice-console__reply {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.voice-console__sources {
+  display: grid;
+  gap: 0.6rem;
+  margin: -0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.voice-console__sources li {
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius-sm);
+  background: var(--cobalt-wash);
+  font-size: 0.95rem;
+}
+:root[data-contrast="high"] .voice-console__sources li {
+  border: var(--border-w) solid var(--rule);
+}
+.voice-console__source-topic {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cobalt);
+}
+
+/* ---------------------------------------------------------------------------
+ * Panels
+ * -------------------------------------------------------------------------*/
 
 .panel {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1rem 1.15rem 1.25rem;
-  background: var(--bg);
+  padding: 1.25rem 1.35rem 1.4rem;
+  border: var(--border-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+.panel h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.6rem;
 }
 .panel h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.15rem;
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.rail .panel h2 {
+  font-size: 1.1rem;
 }
 .panel h3 {
-  font-size: 1rem;
   margin: 1rem 0 0.4rem;
+  font-size: 1.05rem;
 }
 .panel h4 {
-  font-size: 0.9rem;
   margin: 0.6rem 0 0.25rem;
+  font-size: 0.95rem;
 }
 
-.columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
-  gap: 1rem;
-}
-
-/* --- text ---------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+ * Text
+ * -------------------------------------------------------------------------*/
 
 .muted {
-  color: var(--muted);
+  color: var(--graphite);
 }
 .small {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
 }
 .hint {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin: 0 0 0.75rem;
+  margin: 0 0 1rem;
+  max-width: 62ch;
+  color: var(--graphite);
+  font-size: 0.95rem;
 }
 .error {
   color: var(--danger);
-  font-weight: 600;
+  font-weight: 700;
 }
 .warning {
   color: var(--danger);
 }
 .transcript {
-  margin: 0.5rem 0;
-  padding: 0.75rem 1rem;
-  border-left: 4px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--cobalt);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--cobalt-wash);
   font-size: 1.05rem;
-  line-height: 1.5;
+  line-height: 1.55;
+}
+:root[data-contrast="high"] .transcript {
+  border-left-width: 6px;
 }
 
 kbd {
-  font: inherit;
+  padding: 0.05em 0.45em;
+  border: 1px solid var(--rule);
+  border-bottom-width: 3px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
   font-size: 0.85em;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0.05em 0.4em;
+  font-weight: 700;
 }
 code {
-  font-size: 0.9em;
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
   padding: 0.1em 0.35em;
   border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
 
-/* --- controls ------------------------------------------------------------ */
+/* ---------------------------------------------------------------------------
+ * Controls
+ * -------------------------------------------------------------------------*/
 
 button {
+  padding: 0.5rem 0.9rem;
+  border: var(--border-w) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
   font: inherit;
   cursor: pointer;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  padding: 0.45rem 0.8rem;
 }
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--cobalt);
 }
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
+  border-color: var(--cobalt);
+  background: var(--cobalt);
+  color: var(--cobalt-ink);
+  font-weight: 700;
 }
 button.big {
+  padding: 0.85rem 1.6rem;
   font-size: 1.1rem;
-  padding: 0.8rem 1.6rem;
 }
 button.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--rule));
   color: var(--danger);
+}
+button.danger:hover:not(:disabled) {
   border-color: var(--danger);
 }
 button.small-button {
-  font-size: 0.85rem;
-  padding: 0.3rem 0.6rem;
+  min-height: 2.25rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
-input[type="text"] {
+input[type="text"],
+select,
+.edit-textarea {
+  border: var(--border-w) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
   font: inherit;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
+}
+input[type="text"] {
   flex: 1 1 16rem;
   min-width: 0;
+  padding: 0.55rem 0.7rem;
+}
+select {
+  padding: 0.45rem 0.55rem;
 }
 
-/* --- capture ------------------------------------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.field label {
+  color: var(--graphite);
+  font-size: 0.85rem;
+}
+
+.notice {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border: var(--border-w) solid var(--rule);
+  border-left: 4px solid var(--cobalt);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.checkbox input {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Understanding: badges, entities, quality
+ * -------------------------------------------------------------------------*/
 
 .meta {
   display: flex;
@@ -247,17 +930,16 @@ input[type="text"] {
   flex-direction: column;
 }
 .meta dt {
-  font-size: 0.78rem;
-  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--graphite);
 }
 .meta dd {
   margin: 0.1rem 0 0;
-  font-weight: 600;
+  font-weight: 700;
 }
-
-/* --- understanding ------------------------------------------------------- */
 
 .badges {
   display: flex;
@@ -266,11 +948,13 @@ input[type="text"] {
   margin: 0.75rem 0 0.25rem;
 }
 .badge {
-  font-size: 0.8rem;
-  font-weight: 600;
   padding: 0.15rem 0.6rem;
+  border: var(--border-w) solid var(--rule);
   border-radius: 999px;
-  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 /* Note type is always spelled out in words - never colour alone. */
 .badge-todo {
@@ -278,15 +962,15 @@ input[type="text"] {
   color: var(--danger);
 }
 .badge-academic {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--cobalt);
+  color: var(--cobalt);
 }
 .badge-brainstorm {
-  border-color: var(--muted);
+  border-color: var(--graphite);
 }
 .badge-quiet {
-  color: var(--muted);
-  font-weight: 400;
+  color: var(--graphite);
+  font-weight: 500;
 }
 
 .entity-group ul {
@@ -302,197 +986,278 @@ input[type="text"] {
 }
 .quality summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
 }
 .quality table {
-  border-collapse: collapse;
   margin-top: 0.5rem;
+  border-collapse: collapse;
 }
 .quality th,
 .quality td {
-  text-align: left;
   padding: 0.2rem 1.5rem 0.2rem 0;
+  text-align: left;
   font-weight: 400;
 }
 .quality th {
-  color: var(--muted);
+  color: var(--graphite);
 }
 
-/* --- notes and reminders ------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+ * Rail: reminders and notes
+ * -------------------------------------------------------------------------*/
 
 .note-list,
 .reminder-list,
 .status-list {
-  list-style: none;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 .status-list li {
   padding: 0.15rem 0;
 }
 
+/* A reminder reads as a line on a timeline: when, then what. */
+.reminder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0 0.7rem 0.9rem;
+  border-left: 3px solid var(--cobalt);
+}
+.reminder-row + .reminder-row {
+  margin-top: 0.5rem;
+}
+.reminder-title {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.reminder-list p {
+  margin: 0.15rem 0 0;
+}
+
 .note-row {
-  border-top: 1px solid var(--border);
-  padding: 0.5rem 0;
+  padding: 0.35rem 0;
+  border-top: var(--border-w) solid var(--rule);
 }
 .note-row:first-child {
   border-top: none;
 }
 .note-head {
   display: flex;
-  gap: 0.5rem;
   align-items: flex-start;
+  gap: 0.5rem;
 }
 .note-toggle {
   flex: 1;
-  text-align: left;
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
-  padding: 0.35rem;
+  text-align: left;
+}
+.note-toggle:hover:not(:disabled) {
+  background: var(--cobalt-wash);
+}
+:root[data-contrast="high"] .note-toggle:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 2px var(--rule);
+}
+.note-toggle[aria-expanded="true"] {
+  background: var(--cobalt-wash);
 }
 .note-text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: -webkit-box;
+  overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  line-height: 1.45;
 }
 .note-sub {
   display: block;
-  font-size: 0.8rem;
-  color: var(--muted);
-  margin-top: 0.2rem;
+  margin-top: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--graphite);
 }
-.note-detail {
-  padding: 0 0.35rem 0.5rem;
-}
-
-.reminder-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  border-top: 1px solid var(--border);
-  padding: 0.5rem 0;
-}
-.reminder-row:first-child {
-  border-top: none;
-}
-.reminder-title {
-  margin: 0;
-  font-weight: 600;
-}
-.reminder-list p {
-  margin: 0.1rem 0;
-}
-
-/* --- capture controls, notices, checkboxes ------------------------------- */
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-.field label {
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-select {
-  font: inherit;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.notice {
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  border-radius: 6px;
-  padding: 0.6rem 0.8rem;
-  margin: 0.5rem 0 0.75rem;
-  font-size: 0.92rem;
-}
-
-.checkbox {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-.checkbox input {
-  width: 1.05rem;
-  height: 1.05rem;
-}
-
-.note-detail .small-button {
+.note-head .small-button {
   margin-top: 0.4rem;
 }
+.note-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.25rem 0.6rem 0.75rem;
+}
+.note-detail > * {
+  max-width: 100%;
+}
 
-/* --- hierarchy ----------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+ * Knowledge graph
+ * -------------------------------------------------------------------------*/
 
 .subject {
   margin-top: 1rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  border-top: var(--border-w) solid var(--rule);
 }
 .subject h3 {
   margin: 0 0 0.4rem;
-  font-size: 1.05rem;
+  font-size: 1.1rem;
 }
 .topic {
-  margin: 0.35rem 0 0.6rem 0.75rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--border);
+  margin: 0.4rem 0 0.7rem 0.25rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--rule);
 }
 .topic h4 {
   margin: 0;
 }
 .topic-toggle {
+  padding: 0.25rem 0;
   border: none;
   background: none;
-  padding: 0.2rem 0;
+  color: var(--ink);
   font: inherit;
   font-weight: 700;
   text-align: left;
-  color: var(--fg);
+}
+.topic-toggle:hover:not(:disabled) {
+  color: var(--cobalt);
 }
 .topic-summary {
-  margin: 0.1rem 0 0.3rem;
-  color: var(--muted);
-  font-size: 0.9rem;
+  margin: 0.1rem 0 0.35rem;
+  color: var(--graphite);
+  font-size: 0.95rem;
 }
 .topic-notes {
   margin: 0.3rem 0;
   padding-left: 1.2rem;
 }
 .topic-notes li {
-  margin: 0.25rem 0;
+  margin: 0.3rem 0;
 }
 .topic-notes .badge {
   margin-left: 0.4rem;
   font-size: 0.7rem;
 }
 
-/* --- note content: Note-Taking / Link / Edit areas (NexaNota 4.3.3) ------- */
+.view-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+.view-toggle button {
+  padding: 0.35rem 0.8rem;
+  font-size: 0.875rem;
+}
+
+.cluster-graph {
+  margin: 0.5rem 0 1rem;
+}
+.topic-cluster {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem 0.3rem;
+  border: var(--border-w) solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+.topic-cluster:last-child {
+  margin-bottom: 0;
+}
+.cluster-label {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+
+.visual-graph {
+  position: relative;
+  width: 100%;
+  max-width: 32rem;
+  aspect-ratio: 1 / 1;
+  margin: 0.75rem auto 1rem;
+}
+.visual-graph-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.graph-edge {
+  stroke: var(--rule);
+  stroke-width: 1.5;
+}
+.graph-edge-llm {
+  stroke: var(--cobalt);
+}
+.graph-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  padding: 0.35rem;
+  border: 2px solid var(--cobalt);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+.graph-node-recommended {
+  border-style: dashed;
+  border-color: var(--graphite);
+}
+.graph-node-open {
+  border-width: 3px;
+  background: var(--cobalt-wash);
+}
+.graph-node-label {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+.diagram-topic-detail {
+  margin-left: 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--cobalt);
+}
+
+/* ---------------------------------------------------------------------------
+ * Note content (NexaNota 4.3.3) and replay (4.3.1)
+ * -------------------------------------------------------------------------*/
 
 .note-content {
-  margin-top: 0.75rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  width: 100%;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: var(--border-w) solid var(--rule);
 }
 .content-area {
   margin: 0.75rem 0;
 }
 .content-area h5,
 .link-group h5 {
-  margin: 0 0 0.2rem;
-  font-size: 0.85rem;
+  margin: 0 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--muted);
+  color: var(--graphite);
 }
 .content-block {
   margin: 0 0 0.6rem;
@@ -504,7 +1269,7 @@ select {
 .link-group {
   margin: 0.5rem 0;
   padding: 0.5rem 0.75rem;
-  border-left: 3px solid var(--border);
+  border-left: 3px solid var(--rule);
 }
 .resource-list,
 .related-notes-list {
@@ -519,31 +1284,25 @@ select {
 .edit-textarea {
   display: block;
   width: 100%;
-  font: inherit;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
-  resize: vertical;
   margin: 0.3rem 0 0.5rem;
+  padding: 0.65rem 0.75rem;
+  resize: vertical;
 }
-
-/* --- replay (NexaNota 4.3.1) ----------------------------------------------- */
 
 .replay {
+  width: 100%;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  border-top: var(--border-w) solid var(--rule);
 }
 .replay-segments {
-  list-style: none;
   margin: 0.5rem 0 0;
   padding: 0;
+  list-style: none;
 }
 .replay-segment {
-  padding: 0.5rem 0;
-  border-top: 1px solid var(--border);
+  padding: 0.55rem 0;
+  border-top: var(--border-w) solid var(--rule);
 }
 .replay-segment:first-child {
   border-top: none;
@@ -551,219 +1310,9 @@ select {
 .replay-time {
   display: inline-block;
   margin-right: 0.5rem;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .replay-text {
   margin: 0.3rem 0 0.4rem;
 }
-
-/* --- graph view toggle + visual (node/edge) diagram ------------------------
-   The diagram is an additional, sighted-first view of the same data the
-   accessible list view already renders (see GraphPanel.tsx / VisualGraph.tsx
-   for why). Nodes are real <button>s positioned over an SVG that only draws
-   the connecting lines, so keyboard focus and the existing focus ring both
-   keep working on them. */
-
-.view-toggle {
-  display: flex;
-  gap: 0.5rem;
-  margin: 0 0 0.75rem;
-}
-.view-toggle button {
-  padding: 0.35rem 0.75rem;
-  font-size: 0.85rem;
-}
-
-.visual-graph {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  max-width: 32rem;
-  margin: 0.75rem auto 1rem;
-}
-.visual-graph-edges {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.graph-edge {
-  stroke: var(--border);
-  stroke-width: 1.5;
-}
-.graph-edge-llm {
-  stroke: var(--accent);
-}
-
-.graph-node {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 5.5rem;
-  height: 5.5rem;
-  padding: 0.35rem;
-  border-radius: 50%;
-  border: 2px solid var(--accent);
-  background: var(--bg);
-  color: var(--fg);
-  text-align: center;
-  cursor: pointer;
-}
-.graph-node-recommended {
-  border-style: dashed;
-  border-color: var(--muted);
-}
-.graph-node-open {
-  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
-  border-width: 3px;
-}
-.graph-node-label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.15;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-}
-
-.diagram-topic-detail {
-  margin-left: 0;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--accent);
-}
-
-/* --- cluster graph view -------------------------------------------------
-   Each box is one connected component of the topic graph (everything in it
-   reaches everything else through some chain of connections); topics inside
-   reuse the same .topic/.topic-toggle styling as list view, just grouped. */
-
-.cluster-graph {
-  margin: 0.5rem 0 1rem;
-}
-.topic-cluster {
-  margin: 0 0 1rem;
-  padding: 0.6rem 0.75rem 0.2rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.topic-cluster:last-child {
-  margin-bottom: 0;
-}
-.cluster-label {
-  margin: 0 0 0.4rem;
-  font-weight: 700;
-  color: var(--muted);
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-/* --- Voice console: the three keys -------------------------------------- */
-/* Visible state matters even in a screen-reader-first app: low-vision users
-   and sighted collaborators both need to see that the mic is live, and that a
-   conversation is open. Colour is never the only signal - the text says it
-   too, and the conversation button carries aria-pressed. */
-
-.voice-console {
-  border: 2px solid currentColor;
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1.5rem;
-}
-
-.voice-console__keys {
-  margin: 0 0 0.75rem;
-}
-
-.voice-console__buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-.voice-console__buttons button {
-  font-size: 1.05rem;
-  padding: 0.7rem 1.1rem;
-}
-
-.voice-console__status {
-  font-size: 1.05rem;
-  margin: 0.5rem 0 0;
-}
-
-.voice-console__status.is-recording {
-  font-weight: 700;
-}
-
-/* A steady pulse while the microphone is open. Reduced-motion users get the
-   border without the animation - the state is still obvious. */
-.voice-console__status.is-recording::before {
-  content: "";
-  display: inline-block;
-  width: 0.7rem;
-  height: 0.7rem;
-  margin-right: 0.5rem;
-  border-radius: 50%;
-  background: #c0392b;
-  animation: voice-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes voice-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .voice-console__status.is-recording::before { animation: none; }
-}
-
-.voice-console__error { font-weight: 600; }
-
-.voice-console__answer {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid currentColor;
-}
-
-.voice-console__heard { margin: 0 0 0.4rem; opacity: 0.85; }
-
-.voice-console__sources {
-  margin: 0.5rem 0 0;
-  padding-left: 1.2rem;
-  font-size: 0.95rem;
-}
-
-/* An open conversation is a mode, and a mode the user cannot see is a mode
-   they will forget they are in. The panel exists only while one is open, so
-   its presence is the indicator. */
-.voice-console__conversation {
-  margin-top: 0.9rem;
-  padding: 0.75rem 0.9rem;
-  border: 2px dashed currentColor;
-  border-radius: 6px;
-}
-
-.voice-console__conversation h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1.05rem;
-}
-
-.voice-console__turn-count { font-weight: 400; opacity: 0.85; }
-
-.voice-console__turns {
-  margin: 0;
-  padding-left: 1.3rem;
-}
-
-.voice-console__turns li + li {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid currentColor;
-}
-
-.voice-console__turns p { margin: 0; }
-

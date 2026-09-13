@@ -1,39 +1,97 @@
 /**
- * EchoNotes — a basic UI over the capture and understanding backend.
+ * EchoNotes — a spoken notebook for blind and low-vision students.
  *
- * Regions, in the order a screen reader user meets them:
+ * Layout, in the order a screen reader user meets it:
  *
- *   1. Voice          the three keys: record, converse, ask - all spoken
- *   2. Knowledge graph the topics notes were organized into, and how they
- *                      connect (NexaNota redesign, replacing the old
- *                      Subject/Topic/Note hierarchy outline)
- *   3. Notes          what is stored, expandable into its generated content,
- *                      links, your own edits, and a timestamped replay
- *   4. Reminders      what the backend detected as due
+ *   Masthead   the name, and the two settings: read notes aloud, high contrast
+ *   Main       the voice console - three keys, and what EchoNotes is doing now -
+ *              then the knowledge graph the notes were organised into
+ *   Rail       reminders that are coming up, then the notes themselves
  *
- * Everything is a real landmark with a real heading, so heading navigation
- * (H / Shift+H in NVDA and JAWS) works without any custom widget code.
+ * The rail sits beside the keys on a wide screen and below them on a narrow
+ * one. Everything is a real landmark with a real heading, so heading
+ * navigation (H / Shift+H in NVDA and JAWS) works without custom widget code.
  */
 
 import { useCallback, useEffect, useState } from "react";
 
 import { AnnouncerProvider, useAnnouncer } from "@/a11y/Announcer";
+import { useContrastMode } from "@/a11y/contrast";
 import { ErrorBoundary } from "@/a11y/ErrorBoundary";
+import { speak, speechSupported, stopSpeaking } from "@/a11y/speech";
 import { dueSoonReminders } from "@/api/client";
 import { GraphPanel } from "@/components/GraphPanel";
 import { NotesPanel } from "@/components/NotesPanel";
 import { RemindersPanel } from "@/components/RemindersPanel";
 import { VoiceConsole } from "@/components/VoiceConsole";
-import { speak, speechSupported, stopSpeaking } from "@/a11y/speech";
 
 /** How often to check for a reminder that just entered its announce window.
  * A minute is frequent enough that "one hour before" lands within a minute
  * of the hour, and infrequent enough to be a trivial background request. */
 const DUE_SOON_POLL_MS = 60_000;
 
+/**
+ * "EN" in six-dot braille: E is dots 1 and 5, N is dots 1, 3, 4 and 5. Dots are
+ * numbered down the left column (1-3), then down the right (4-6).
+ */
+const BRAILLE_EN: number[][] = [
+  [1, 5],
+  [1, 3, 4, 5],
+];
+
+function BrailleMark() {
+  return (
+    <span className="brand__mark" aria-hidden="true">
+      {BRAILLE_EN.map((raised, cell) => (
+        <span key={cell} className="braille-cell">
+          {[1, 2, 3, 4, 5, 6].map((dot) => (
+            <span
+              key={dot}
+              className="braille-dot"
+              data-raised={raised.includes(dot) ? "" : undefined}
+            />
+          ))}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+interface SwitchProps {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+/** An on/off switch whose state is written out, not shown by colour alone. */
+function Switch({ id, label, checked, onChange }: SwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      className="switch"
+      aria-checked={checked}
+      aria-labelledby={`${id}-label`}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="switch__track" aria-hidden="true">
+        <span className="switch__thumb" />
+      </span>
+      <span id={`${id}-label`} className="switch__label">
+        {label}
+      </span>
+      <span className="switch__state" aria-hidden="true">
+        {checked ? "On" : "Off"}
+      </span>
+    </button>
+  );
+}
+
 function Dashboard() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoSpeak, setAutoSpeak] = useState(true);
+  const [contrast, setContrast] = useContrastMode();
   const { announce } = useAnnouncer();
 
   const onCaptured = useCallback(() => {
@@ -71,60 +129,68 @@ function Dashboard() {
   }, [announce]);
 
   return (
-    <>
-      <a className="skip-link" href="#main">
-        Skip to main content
+    <div className="shell">
+      <a className="skip-link" href="#voice">
+        Skip to the voice keys
       </a>
 
-      <header className="app-header">
-        <h1>EchoNotes</h1>
-        <p className="muted">Voice notes, transcribed and understood.</p>
-      </header>
+      <header className="masthead">
+        <div className="brand">
+          <BrailleMark />
+          <div>
+            <h1 className="brand__name">EchoNotes</h1>
+            <p className="brand__tagline">Your spoken notebook</p>
+          </div>
+        </div>
 
-      <main id="main">
-        <section aria-labelledby="speech-heading" className="panel">
-          <h2 id="speech-heading">Voice output</h2>
+        <section className="settings" aria-labelledby="settings-heading">
+          <h2 id="settings-heading" className="visually-hidden">
+            Voice and display
+          </h2>
           {speechSupported() ? (
-            <>
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={autoSpeak}
-                  onChange={(event) => {
-                    setAutoSpeak(event.target.checked);
-                    if (!event.target.checked) stopSpeaking();
-                  }}
-                />
-                Read each new note aloud automatically
-              </label>
-              <p className="muted small">
-                Every note and answer also has its own “Read aloud” button.
-              </p>
-            </>
+            <Switch
+              id="read-aloud"
+              label="Read notes aloud"
+              checked={autoSpeak}
+              onChange={(next) => {
+                setAutoSpeak(next);
+                if (!next) stopSpeaking();
+                announce(next ? "New notes will be read aloud." : "New notes will not be read aloud.");
+              }}
+            />
           ) : (
             <p role="alert" className="error">
-              This browser has no speech synthesis, so notes cannot be read
-              aloud. Chrome and Edge both support it.
+              This browser cannot speak, so notes cannot be read aloud. Chrome
+              and Edge both can.
             </p>
           )}
+          <Switch
+            id="high-contrast"
+            label="High contrast"
+            checked={contrast === "high"}
+            onChange={(next) => {
+              setContrast(next ? "high" : "standard");
+              announce(next ? "High contrast and large text on." : "High contrast off.");
+            }}
+          />
         </section>
+      </header>
 
-        {/* The voice console: Space records a note, Shift opens a
-            conversation, Enter asks a question, and every result is spoken.
-            It is the only way to record or ask: the Capture and Ask panels
-            were removed, the first because it bound Space on the window too
-            and one press reached both, the second because a typed question
-            cannot be entered when only three keys do anything. */}
-        <VoiceConsole onNoteCaptured={onCaptured} autoSpeak={autoSpeak} />
+      <div className="layout">
+        <main id="main" className="stage">
+          {/* The voice console: Space records a note, Shift opens a
+              conversation, Enter asks a question, and every result is spoken.
+              It is the only way to record or ask. */}
+          <VoiceConsole onNoteCaptured={onCaptured} autoSpeak={autoSpeak} />
+          <GraphPanel refreshKey={refreshKey} />
+        </main>
 
-        <GraphPanel refreshKey={refreshKey} />
-
-        <div className="columns">
-          <NotesPanel refreshKey={refreshKey} />
+        <aside className="rail" aria-label="Reminders and notes">
           <RemindersPanel refreshKey={refreshKey} />
-        </div>
-      </main>
-    </>
+          <NotesPanel refreshKey={refreshKey} />
+        </aside>
+      </div>
+    </div>
   );
 }
 
