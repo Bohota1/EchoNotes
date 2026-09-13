@@ -153,6 +153,20 @@ class Settings(BaseSettings):
     # over the 25 MB upload cap - transcribe locally instead. A slower, less
     # accurate note beats a lost one.
     asr_fallback_to_local: bool = True
+    # Context handed to the recogniser for a spoken question, and only for one.
+    # A note is 15 seconds of speech and carries its own context; a question is
+    # 1.5 to 3 seconds of voice with nothing around it, so near-soundalikes win:
+    # "notes" heard as "questions", "interview" as "legislate". Measured on
+    # six real questions, two runs each, words wrong: no prompt 16; this prompt
+    # 8. Rejected: a prompt ending "...related to a topic?" (6 wrong, but copied
+    # "a topic" into a question), and one listing the user's topic names (8
+    # wrong, and inserted "interview purpose", a topic that was not said). This
+    # one leaves nothing specific enough to copy. Its only measured side effect
+    # was "Read the whole note" as "...notes", which reads as the same request.
+    question_asr_prompt: str = (
+        "Questions about my own notes. Do I have notes on... "
+        "What did I write about... Read my notes on..."
+    )
     # "base" mishears technical vocabulary badly - measured: "linked list" ->
     # "lengthless", "computer science" -> "computer size", "means planning how"
     # -> "needs flattening powers of". "small" fixes those and is the default
