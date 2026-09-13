@@ -222,11 +222,6 @@ button.small-button {
   font-size: 0.85rem;
   padding: 0.3rem 0.6rem;
 }
-button.chip {
-  font-size: 0.85rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-}
 
 input[type="text"] {
   font: inherit;
@@ -321,36 +316,6 @@ input[type="text"] {
 }
 .quality th {
   color: var(--muted);
-}
-
-/* --- ask ----------------------------------------------------------------- */
-
-.ask-form label {
-  display: block;
-  font-size: 0.85rem;
-  color: var(--muted);
-  margin-bottom: 0.25rem;
-}
-.ask-row {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.examples {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.6rem;
-}
-.answer {
-  margin-top: 1rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.5rem;
-}
-.answer-text {
-  font-size: 1.05rem;
-  line-height: 1.55;
 }
 
 /* --- notes and reminders ------------------------------------------------- */
@@ -462,8 +427,7 @@ select {
   height: 1.05rem;
 }
 
-.note-detail .small-button,
-.answer .small-button {
+.note-detail .small-button {
   margin-top: 0.4rem;
 }
 
