@@ -230,7 +230,6 @@ def ask_stop(
     nothing, so this matters as much here as it does for the note itself.
     """
     from app.capture.live import get_live_recorder
-    from app.nlp.correction import correct_transcript_safe
     from app.pipeline.capture_pipeline import transcribe_audio
 
     recorder = get_live_recorder()
@@ -250,9 +249,7 @@ def ask_stop(
             detail=f"could not transcribe the question: {exc}",
         ) from exc
 
-    question = correct_transcript_safe(
-        transcription.text, kind="question", unclear=transcription.unclear_passages()
-    ).strip()
+    question = _heard_question(transcription)
 
     if not question:
         # Silence, or speech the recogniser could not make out. Said plainly
@@ -269,11 +266,69 @@ def ask_stop(
     )
     db.commit()
 
+    _say_what_was_heard(outcome, question, transcription)
+
     response = _to_response(outcome, include_speech=True)
     # What the system heard, so a user who was misheard can tell why the answer
     # is odd - and so the UI can show it alongside the answer.
     response.data = {**response.data, "question": question}
     return response
+
+
+def _heard_question(transcription) -> str:
+    """The question to answer: what was heard, repaired only where it is safe.
+
+    Correction runs only where the recogniser was unsure (see
+    `correct_transcript`), and a correction that turns one kind of request into
+    another is discarded. Measured: "Read the whole note." came back as "What is
+    the whole note?", which would have answered a question instead of reading
+    the note. Repairing a misheard word must never change what was asked for.
+    """
+    from app.nlp.correction import correct_transcript_safe
+    from app.rag.intent import parse_intent
+
+    heard = (transcription.text or "").strip()
+    corrected = correct_transcript_safe(
+        heard, kind="question", unclear=transcription.unclear_passages()
+    ).strip()
+
+    if heard and corrected and corrected != heard:
+        if parse_intent(corrected).intent != parse_intent(heard).intent:
+            logger.warning(
+                "question correction changed the request (%r -> %r); keeping what was heard",
+                heard,
+                corrected,
+            )
+            return heard
+    return corrected or heard
+
+
+def _say_what_was_heard(outcome: VoiceQueryOutcome, question: str, transcription) -> None:
+    """Start the spoken reply with the question as heard, when that matters.
+
+    On screen the question is shown beside the answer. A user who cannot see the
+    screen has no way to tell "you have no notes about English" from "I
+    misheard you" - so it is said aloud, but only when a mishearing is a likely
+    explanation: nothing was found, the request was not understood, or the
+    recogniser itself was unsure. Said before every answer, it would add seconds
+    to each one and teach the user to tune it out.
+    """
+    from app.tts.engine import speak
+
+    unsure = bool(transcription.unclear_passages())
+    if outcome.ok and outcome.method != "empty" and not unsure:
+        return
+
+    heard = question.strip().rstrip(".?!")
+    if not heard:
+        return
+    outcome.spoken = f"I heard: {heard}. {outcome.spoken}"
+    if outcome.speech is not None:
+        outcome.speech = speak(
+            outcome.spoken,
+            earcon=outcome.speech.earcon,
+            interrupt=outcome.speech.interrupt,
+        )
 
 
 @router.post(
