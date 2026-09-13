@@ -27,7 +27,7 @@ a question; the panels below it on the page only show what is stored.
 |---|---|
 | `Space` | Record a note. Press again to stop; the note is transcribed, filed and read back |
 | `Shift` | Open a conversation. Press again to end it |
-| `Enter` | Ask a question. Inside a conversation, follow-ups keep their context |
+| `Enter` | Ask a question. The question as heard is read back, then the answer. Inside a conversation, follow-ups keep their context |
 
 **No other key does anything.** Tab, Escape, arrows, letters and Backspace are all swallowed. A
 person who cannot see the page cannot tell what an unexpected key did: `Tab` silently moves focus
