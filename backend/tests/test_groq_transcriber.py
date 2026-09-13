@@ -230,3 +230,32 @@ class TestUnclearPassages:
             segments=[TranscriptSegment(0, 1, "murky part", avg_logprob=-0.78)],
         )
         assert result.unclear_passages() == ["murky part"]
+
+
+class TestPerRecordingPrompt:
+    """A spoken question hands its own context; a note hands none."""
+
+    def test_a_given_prompt_is_sent(self, fixture_wav):
+        client = FakeGroq(response(seg("hello there")))
+        GroqTranscriber(api_key="k", client=client).transcribe(fixture_wav, prompt="Questions about my notes.")
+        assert client.calls[0]["prompt"] == "Questions about my notes."
+
+    def test_no_prompt_is_sent_for_a_note(self, fixture_wav):
+        client = FakeGroq(response(seg("hello there")))
+        GroqTranscriber(api_key="k", client=client).transcribe(fixture_wav)
+        assert "prompt" not in client.calls[0]
+
+    def test_an_overlong_prompt_is_cut_to_what_groq_accepts(self, fixture_wav):
+        """Groq answers a longer one with 400, which would push every capture
+        onto the slower local fallback."""
+        client = FakeGroq(response(seg("hello there")))
+        GroqTranscriber(api_key="k", client=client).transcribe(fixture_wav, prompt="x" * 2000)
+        assert len(client.calls[0]["prompt"]) == groq_transcriber.MAX_PROMPT_CHARS
+
+    def test_the_prompt_survives_the_fallback(self, fixture_wav):
+        local = FakeTranscriber(text="spoken locally")
+        client = FakeGroq(error=RuntimeError("503"))
+        GroqTranscriber(api_key="k", client=client, fallback=local).transcribe(
+            fixture_wav, prompt="Questions about my notes."
+        )
+        assert local.prompts == ["Questions about my notes."]
