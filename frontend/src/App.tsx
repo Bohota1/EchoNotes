@@ -4,13 +4,12 @@
  * Regions, in the order a screen reader user meets them:
  *
  *   1. Voice          the three keys: record, converse, ask - all spoken
- *   2. Ask            the same question path, typed, for sighted use
- *   3. Knowledge graph the topics notes were organized into, and how they
+ *   2. Knowledge graph the topics notes were organized into, and how they
  *                      connect (NexaNota redesign, replacing the old
  *                      Subject/Topic/Note hierarchy outline)
- *   4. Notes          what is stored, expandable into its generated content,
+ *   3. Notes          what is stored, expandable into its generated content,
  *                      links, your own edits, and a timestamped replay
- *   5. Reminders      what the backend detected as due
+ *   4. Reminders      what the backend detected as due
  *
  * Everything is a real landmark with a real heading, so heading navigation
  * (H / Shift+H in NVDA and JAWS) works without any custom widget code.
@@ -20,7 +19,6 @@ import { useCallback, useState } from "react";
 
 import { AnnouncerProvider } from "@/a11y/Announcer";
 import { ErrorBoundary } from "@/a11y/ErrorBoundary";
-import { AskPanel } from "@/components/AskPanel";
 import { GraphPanel } from "@/components/GraphPanel";
 import { NotesPanel } from "@/components/NotesPanel";
 import { RemindersPanel } from "@/components/RemindersPanel";
@@ -77,13 +75,11 @@ function Dashboard() {
 
         {/* The voice console: Space records a note, Shift opens a
             conversation, Enter asks a question, and every result is spoken.
-            It owns those keys alone - the old Capture panel bound Space on
-            the window too, so one press reached both. The panels below are
-            the same functionality for sighted use, kept because "accessible"
-            should not mean "a worse version for everyone else". */}
+            It is the only way to record or ask: the Capture and Ask panels
+            were removed, the first because it bound Space on the window too
+            and one press reached both, the second because a typed question
+            cannot be entered when only three keys do anything. */}
         <VoiceConsole onNoteCaptured={onCaptured} autoSpeak={autoSpeak} />
-
-        <AskPanel />
 
         <GraphPanel refreshKey={refreshKey} />
 
