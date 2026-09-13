@@ -29,6 +29,7 @@ import logging
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.errors import AudioCaptureError
 from app.db.session import get_db
 from app.rag.indexer import index_stats, reindex_all
@@ -129,7 +130,9 @@ async def voice_query(
     suffix = "." + (file.filename or "query.wav").rsplit(".", 1)[-1]
     try:
         captured = UploadCaptureSource(data, suffix=suffix).capture()
-        transcription = transcribe_audio(captured.path)
+        transcription = transcribe_audio(
+            captured.path, prompt=get_settings().question_asr_prompt
+        )
     except Exception as exc:
         logger.exception("voice query transcription failed")
         raise HTTPException(
@@ -224,10 +227,11 @@ def ask_stop(
 ):
     """The spoken half of the two-button loop: audio in, spoken answer out.
 
-    Transcription goes through exactly the same stack a captured note uses, so
-    a question benefits from the same model, the same forced language and the
-    same vocabulary priming - a question misheard as "system designs" finds
-    nothing, so this matters as much here as it does for the note itself.
+    Recorded and transcribed exactly as a note is - the same recorder, the
+    same recogniser, the same correction. One difference, on purpose: a
+    question is handed `question_asr_prompt` as context. A note is fifteen
+    seconds of speech and carries its own; a question is two seconds with
+    nothing around it, and without context "notes" came back as "questions".
     """
     from app.capture.live import get_live_recorder
     from app.pipeline.capture_pipeline import transcribe_audio
@@ -241,7 +245,9 @@ def ask_stop(
         ) from exc
 
     try:
-        transcription = transcribe_audio(captured.path)
+        transcription = transcribe_audio(
+            captured.path, prompt=get_settings().question_asr_prompt
+        )
     except Exception as exc:
         logger.exception("could not transcribe the spoken question")
         raise HTTPException(
@@ -276,20 +282,23 @@ def ask_stop(
 
 
 def _heard_question(transcription) -> str:
-    """The question to answer: what was heard, repaired only where it is safe.
+    """The question to answer: what was heard, corrected as a note would be.
 
-    Correction runs only where the recogniser was unsure (see
-    `correct_transcript`), and a correction that turns one kind of request into
-    another is discarded. Measured: "Read the whole note." came back as "What is
-    the whole note?", which would have answered a question instead of reading
-    the note. Repairing a misheard word must never change what was asked for.
+    The same correction a note gets, not a question-specific one. The separate
+    question rewrite was unstable on real recordings - three runs on one clip
+    gave three different sentences, one of them "Do you have..." for "Do I
+    have..." - while the note path left the same text alone.
+
+    A correction that turns one kind of request into another is still
+    discarded. Measured: "Read the whole note." came back as "What is the
+    whole note?". Repairing a word must never change what was asked for.
     """
     from app.nlp.correction import correct_transcript_safe
     from app.rag.intent import parse_intent
 
     heard = (transcription.text or "").strip()
     corrected = correct_transcript_safe(
-        heard, kind="question", unclear=transcription.unclear_passages()
+        heard, unclear=transcription.unclear_passages()
     ).strip()
 
     if heard and corrected and corrected != heard:
