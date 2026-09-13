@@ -48,6 +48,8 @@ Rules you must not break:
 - If the notes do not contain the answer, say so plainly in one sentence.
 - Put the answer in the first sentence. No preamble, no "based on your notes".
 - Cite which note number(s) you used, as [1] or [2], inline.
+- If the question asks whether notes exist about something, say yes or no, then
+  say in one sentence what those notes cover.
 - Be brief: under 45 words unless the question genuinely needs more.
 - Plain sentences only. No markdown, no bullet points, no headings."""
 
@@ -221,10 +223,17 @@ def _empty_answer(parsed_intent: Intent, result: RetrievalResult) -> GroundedAns
     actionable ("try without the date"), while "I found nothing" is a dead end.
     """
     scope = result.filter_description
-    if result.query and scope:
-        text = f"I don't have any notes about {result.query} in {scope}."
-    elif result.query:
-        text = f"I don't have any notes about {result.query}."
+    # The query is read back so the user knows what was searched for. One that
+    # is still a whole sentence means the phrasing was not recognised, and "I
+    # don't have any notes about do I have any notes related to English" is
+    # noise, not information.
+    query = result.query or ""
+    if len(query.split()) > 6:
+        query = ""
+    if query and scope:
+        text = f"I don't have any notes about {query} in {scope}."
+    elif query:
+        text = f"I don't have any notes about {query}."
     elif scope:
         text = f"I don't have any notes in {scope}."
     else:
