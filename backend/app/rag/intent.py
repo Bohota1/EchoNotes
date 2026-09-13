@@ -273,6 +273,13 @@ _SEARCH_RE = re.compile(
     r"|search\s+(?:my\s+)?notes?"
     r"|show\s+me\s+(?:my\s+)?notes?"
     r"|what\s+notes?\s+do\s+i\s+have"
+    # "Do I have any notes related to X?" - asked this way, not recognised, it
+    # searched for the whole sentence, and an empty result read that sentence
+    # back as if it were a topic.
+    r"|do\s+i\s+have\s+(?:any\s+)?notes?"
+    r"|do\s+i\s+have\s+anything"
+    r"|are\s+there\s+(?:any\s+)?notes?"
+    r"|have\s+i\s+(?:got\s+|written\s+|made\s+|taken\s+)?(?:any\s+)?notes?"
     r"|what\s+(?:ideas?|tasks?|to-?dos?|thoughts?)\s+did\s+i\s+have)"
     r"\s*(?P<rest>.*?)\s*\??\s*$",
     re.I,
