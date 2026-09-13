@@ -4,11 +4,19 @@
  *   Space   record a note (press to start, press again to stop)
  *   Shift   open a conversation, and press again to end it
  *   Enter   ask a question — inside a conversation if one is open
- *   Esc     cancel whatever is in progress
  *
- * Nothing here requires seeing the screen, reading a label, or finding a
- * control, which is the point: a person who cannot see the page cannot hunt
- * for a button.
+ * **No other key does anything.** Tab, Escape, arrows, letters, Backspace -
+ * all swallowed. A person who cannot see the page cannot tell what an
+ * unexpected key did: Tab silently moves focus onto a button, and the next
+ * Space then presses that button instead of recording. With three keys and
+ * nothing else, every press has exactly one meaning wherever focus happens to
+ * be.
+ *
+ * Keys are caught in the capture phase on the window, before any element on
+ * the page sees them, so a focused button, link or field cannot claim Space or
+ * Enter first. Shortcuts held with Ctrl, Alt or the system key pass through:
+ * those belong to the browser and the operating system, and blocking the few
+ * a page can block would only trap the user in the tab.
  *
  * Both recording keys toggle. A hold-to-talk binding is tempting and wrong
  * here: it forces the user to keep a finger down while thinking, and a key
@@ -46,7 +54,6 @@ import { speak, speechSupported, stopSpeaking } from "@/a11y/speech";
 import {
   askStart,
   askStop,
-  cancelRecording,
   sessionEnd,
   sessionStart,
   startRecording,
@@ -83,16 +90,9 @@ interface Props {
   autoSpeak?: boolean;
 }
 
-/** Keys typed into a field, or used to press a control, are never ours. */
-function isTypingContext(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  const tag = el.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  if (el.isContentEditable) return true;
-  // Space and Enter activate a focused button or link. Taking them here would
-  // break every other control on the page for keyboard users.
-  return tag === "BUTTON" || tag === "A";
+/** Held with one of these, a key is a browser or system shortcut. */
+function isShortcut(event: KeyboardEvent): boolean {
+  return event.ctrlKey || event.altKey || event.metaKey;
 }
 
 export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
@@ -162,23 +162,6 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
       setMode("idle");
     }
   }, [autoSpeak, onNoteCaptured, say]);
-
-  /**
-   * Escape abandons a recording. The microphone has to be told: dropping the
-   * mode alone left the device open, and the next Space then failed on a
-   * recorder that was already running.
-   */
-  const cancelCapture = useCallback(async () => {
-    setMode("idle");
-    say("Cancelled.", { interrupt: true });
-    try {
-      await cancelRecording();
-    } catch {
-      // Escape means "never mind". The user has been told it is cancelled and
-      // the console is idle; surfacing a failure here would contradict that.
-      // If the device really is still open, the next Space says so.
-    }
-  }, [say]);
 
   // --- conversation: Shift ----------------------------------------------
 
@@ -254,40 +237,35 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
     let shiftArmedAt: number | null = null;
 
     function onKeyDown(event: KeyboardEvent) {
-      const chorded = event.ctrlKey && event.altKey;
-      const typing = !chorded && isTypingContext(event.target);
-
-      if (event.key === "Shift") {
-        // Held for a capital letter, or pressed inside a field: not ours. The
-        // keyup handler still needs the timestamp to tell a tap from a hold.
-        shiftArmedAt = typing || event.repeat ? null : Date.now();
+      if (isShortcut(event)) {
+        shiftArmedAt = null;
         return;
       }
-      // Any other key means the Shift that may be down is a modifier.
+
+      if (event.key === "Shift") {
+        // A held Shift is not a tap. The keyup handler needs the timestamp to
+        // tell the two apart.
+        shiftArmedAt = event.repeat ? null : Date.now();
+        return;
+      }
+      // Any other key means the Shift that may be down was not a bare tap.
       shiftArmedAt = null;
 
-      if (typing) return;
-      if (event.repeat) return;
+      // Swallowed before anything else on the page sees it: no focus move, no
+      // button press, no typing, no scroll.
+      event.preventDefault();
+      event.stopPropagation();
 
       const isSpace = event.code === "Space";
       const isEnter = event.key === "Enter";
-      if (!isSpace && !isEnter) {
-        // Escape abandons a recording without saving or asking.
-        if (event.key === "Escape" && modeRef.current !== "idle") {
-          event.preventDefault();
-          void cancelCapture();
-        }
-        return;
-      }
+      if (!isSpace && !isEnter) return;
+      if (event.repeat) return;
 
       const current = modeRef.current;
       if (current === "working") {
-        event.preventDefault();
         say("Still working. One moment.", { interrupt: true });
         return;
       }
-
-      event.preventDefault();
 
       if (isSpace) {
         if (current === "question") {
@@ -306,6 +284,12 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
     }
 
     function onKeyUp(event: KeyboardEvent) {
+      if (isShortcut(event)) return;
+      // A focused button presses on the *release* of Space, so the release is
+      // swallowed too.
+      event.preventDefault();
+      event.stopPropagation();
+
       if (event.key !== "Shift") return;
       const armedAt = shiftArmedAt;
       shiftArmedAt = null;
@@ -315,18 +299,17 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
         say("Finish what you are recording first.", { interrupt: true });
         return;
       }
-      event.preventDefault();
       void toggleSession();
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
+    // Capture phase: the window hears the key before any element does.
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("keyup", onKeyUp, { capture: true });
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
+      window.removeEventListener("keyup", onKeyUp, { capture: true });
     };
   }, [
-    cancelCapture,
     finishNote,
     finishQuestion,
     say,
@@ -343,7 +326,8 @@ export function VoiceConsole({ onNoteCaptured, autoSpeak = true }: Props) {
 
       <p className="voice-console__keys">
         <kbd>Space</kbd> records a note. <kbd>Shift</kbd> starts and ends a
-        conversation. <kbd>Enter</kbd> asks a question. <kbd>Esc</kbd> cancels.
+        conversation. <kbd>Enter</kbd> asks a question. No other key does
+        anything.
       </p>
 
       {/* The buttons mirror the keys rather than replacing them: a mouse or
