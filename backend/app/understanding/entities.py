@@ -1,10 +1,11 @@
 """Rule-based entity extraction.
 
-Pulls five things out of a note:
+Pulls six things out of a note:
 
     person      people mentioned
     date        any date reference
     deadline    a date that something is due by
+    time        a clock-time reference ("3:30 am", "10 pm")
     task        an action the speaker committed to
     key_phrase  what the note is about
 
@@ -228,7 +229,22 @@ def normalize_date(expression: str, reference: datetime | None = None) -> str | 
             "RETURN_AS_TIMEZONE_AWARE": False,
         },
     )
-    return parsed.date().isoformat() if parsed else None
+    if parsed is None:
+        return None
+
+    # dateparser's own "future" bias resolves a bare month+day against
+    # midnight of `reference`'s day, which is already in the past the moment
+    # this runs at any time after midnight - so a date that names *today*
+    # ("on 13 September", said on the 13th) gets bumped a full year ahead
+    # instead of meaning today, which is the single most common phrasing an
+    # event mention ("I have a meeting ... on <today's date>") uses. The rest
+    # of today has not happened yet, so today is always a valid "future"
+    # reading whenever the resolved month and day match the reference's -
+    # only the year dateparser guessed is wrong.
+    if (parsed.month, parsed.day) == (reference.month, reference.day) and parsed.year != reference.year:
+        parsed = parsed.replace(year=reference.year)
+
+    return parsed.date().isoformat()
 
 
 def _has_deadline_cue(text: str, start: int) -> bool:
@@ -267,6 +283,157 @@ def extract_dates(
                 normalized=normalized,
                 # A date we could not resolve is still a real mention, but a
                 # caller should not schedule anything on it.
+                confidence=0.85 if normalized else 0.5,
+                span_start=match.start(),
+                span_end=match.end(),
+            )
+        )
+
+    return entities
+
+
+# --- clock times -------------------------------------------------------------
+#
+# A date says which day; a time says which moment in that day. Kept as its own
+# extractor rather than folded into `extract_dates` so a caller (the event-
+# mention reminder pathway in `app/reminders/clarify.py`) can ask for "was a
+# time mentioned" independently of "was a date mentioned" - a note can have
+# either, both or neither, and only the pairing decides what to do about it.
+# Per this module's own rule ("rules run first ... deterministic, instant"),
+# times are resolved here too rather than by a second parser downstream.
+
+#: "am"/"pm" with either, both or neither dot ("am", "a.m.", "a.m", "am."),
+#: case-insensitive throughout via the compiled flags below.
+_MERIDIEM = r"(?:a\.?m\.?|p\.?m\.?)"
+
+_TIME_PATTERNS = [
+    # "4.10 pm", "4:10 p.m." - a dot is only treated as an hour/minute
+    # separator when a.m./p.m. follows, so an ordinary decimal number
+    # ("3.14") is never mistaken for a time.
+    r"\b\d{1,2}[:.]\d{2}\s*%s\b" % _MERIDIEM,
+    # "15:30", "3:30" - colon only, no meridiem required. A bare dot here
+    # (no am/pm) is far more often a decimal number than a time, so it is not
+    # accepted in this branch.
+    r"\b\d{1,2}:\d{2}\b",
+    # "3 pm", "10am"
+    r"\b\d{1,2}\s*%s\b" % _MERIDIEM,
+    # "three o'clock", "10 o'clock"
+    r"\b\d{1,2}\s*o'?clock\b",
+]
+_TIME_RE = re.compile("|".join(f"(?:{p})" for p in _TIME_PATTERNS), re.IGNORECASE)
+
+_TIME_MERIDIEM_RE = re.compile(
+    r"\b(?P<hour>\d{1,2})(?:[:.](?P<minute>\d{2}))?\s*(?P<meridiem>%s)\b" % _MERIDIEM,
+    re.IGNORECASE,
+)
+_TIME_OCLOCK_RE = re.compile(r"\b(?P<hour>\d{1,2})\s*o'?clock\b", re.IGNORECASE)
+#: Colon only, deliberately - see _TIME_PATTERNS above for why a dot is not
+#: accepted here.
+_TIME_24H_RE = re.compile(r"\b(?P<hour>\d{1,2}):(?P<minute>\d{2})\b")
+
+
+def normalize_time(expression: str) -> str | None:
+    """Resolve a spoken clock time to a 24-hour `HH:MM:SS` string.
+
+    No `reference` parameter: unlike a date, a bare time is never relative to
+    the capture moment, so nothing to resolve it against is needed.
+
+    A bare hour with no am/pm ("3:30", "three o'clock") is still resolved
+    here - to the literal digits, as if read on a 24-hour clock - rather than
+    guessed at as morning or evening. Guessing wrong would fire a reminder
+    twelve hours off, which is worse than asking; `time_is_ambiguous` below is
+    how a caller (`app/reminders/clarify.py`) knows this particular value is a
+    placeholder that still needs "is it AM or PM?" before it is trusted.
+    """
+    # Lowercased only - NOT stripped of dots. "4.10 p.m." needs its dot to
+    # stay put to separate hour from minute; only the meridiem's own dots
+    # ("p.m.") are stripped, and only after it has already been matched as a
+    # unit below.
+    text = expression.strip().lower()
+
+    match = _TIME_MERIDIEM_RE.search(text)
+    if match:
+        hour = int(match.group("hour"))
+        minute = int(match.group("minute") or 0)
+        meridiem = match.group("meridiem").replace(".", "")
+        if not (1 <= hour <= 12) or not (0 <= minute < 60):
+            return None
+        if meridiem == "pm" and hour != 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        return f"{hour:02d}:{minute:02d}:00"
+
+    match = _TIME_OCLOCK_RE.search(text)
+    if match:
+        hour = int(match.group("hour"))
+        if 1 <= hour <= 12:
+            return f"{hour:02d}:00:00"
+        return None
+
+    match = _TIME_24H_RE.search(text)
+    if match:
+        hour = int(match.group("hour"))
+        minute = int(match.group("minute"))
+        if 0 <= hour <= 23 and 0 <= minute < 60:
+            return f"{hour:02d}:{minute:02d}:00"
+
+    return None
+
+
+def time_is_ambiguous(expression: str) -> bool:
+    """True when `expression` names an hour but never says am/pm, so the
+    value `normalize_time` returns for it is a placeholder rather than a
+    trustworthy time - "3:30" and "three o'clock" could be either half of the
+    day; "3:30 pm" and "15:30" cannot.
+
+    Only checked against the *raw* spoken expression, never the normalized
+    result: after an explicit "3 pm" is converted to "15:00:00" it looks the
+    same, digit-wise, as an unresolved 24-hour hour, so the source words are
+    what actually settles it.
+
+    Used by `app/reminders/clarify.py` to decide whether to ask "Is it AM or
+    PM?" before a time is treated as final.
+    """
+    text = expression.strip().lower()
+
+    if _TIME_MERIDIEM_RE.search(text):
+        return False  # am/pm was said outright - nothing to ask.
+
+    match = _TIME_OCLOCK_RE.search(text)
+    if match:
+        return 1 <= int(match.group("hour")) <= 12
+
+    match = _TIME_24H_RE.search(text)
+    if match:
+        # 13-23 can only be a 24-hour reading (there is no "15 pm"), and 0 is
+        # midnight either way - only 1-12 is genuinely two-way ambiguous.
+        return 1 <= int(match.group("hour")) <= 12
+
+    return False
+
+
+def extract_times(text: str) -> list[ExtractedEntity]:
+    """Find clock-time expressions ("3:30 am", "10 pm", "15:30")."""
+    entities: list[ExtractedEntity] = []
+    seen: set[tuple[int, int]] = set()
+
+    for match in _TIME_RE.finditer(text):
+        span = (match.start(), match.end())
+        if span in seen:
+            continue
+        seen.add(span)
+
+        expression = match.group(0).strip()
+        normalized = normalize_time(expression)
+
+        entities.append(
+            ExtractedEntity(
+                kind="time",
+                value=expression,
+                normalized=normalized,
+                # Same convention as extract_dates: an unresolved mention is
+                # still real, but scored below the auto-create floor.
                 confidence=0.85 if normalized else 0.5,
                 span_start=match.start(),
                 span_end=match.end(),
@@ -429,18 +596,19 @@ def extract_all(
 ) -> list[ExtractedEntity]:
     """Run every rule extractor and return one merged, de-duplicated list.
 
-    Key phrases that sit on top of an already-identified person or date are
-    dropped: "call sarah" and "next friday" are real word runs, but they are the
-    person and the deadline that were already extracted, not what the note is
-    about.
+    Key phrases that sit on top of an already-identified person, date or time
+    are dropped: "call sarah" and "next friday" are real word runs, but they
+    are the person and the deadline that were already extracted, not what the
+    note is about.
     """
     people = extract_people(text)
     dates = extract_dates(text, reference)
+    times = extract_times(text)
     tasks = extract_tasks(text)
 
     claimed = [
         (e.span_start, e.span_end)
-        for e in (*people, *dates)
+        for e in (*people, *dates, *times)
         if e.span_start is not None and e.span_end is not None
     ]
     phrases = [
@@ -450,7 +618,7 @@ def extract_all(
     ][:key_phrase_limit]
 
     merged: dict[tuple[str, str], ExtractedEntity] = {}
-    for entity in (*people, *dates, *tasks, *phrases):
+    for entity in (*people, *dates, *times, *tasks, *phrases):
         key = entity.key()
         existing = merged.get(key)
         if existing is None or entity.confidence > existing.confidence:
