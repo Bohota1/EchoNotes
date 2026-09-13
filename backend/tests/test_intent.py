@@ -150,3 +150,25 @@ class TestNoteTypes:
     def test_substring_does_not_match(self):
         """"ideation" contains "idea" but is not a request for brainstorms."""
         assert detect_note_types("notes about ideation research") == []
+
+
+class TestDoIHaveNotesAbout:
+    """"Do I have any notes related to interview?" searched for the whole
+    sentence, and an empty result read that sentence back as a topic: "I don't
+    have any notes about Do I have any notes related to English"."""
+
+    @pytest.mark.parametrize(
+        "utterance,expected_query",
+        [
+            ("Do I have any notes related to interview?", "interview"),
+            ("Do I have notes about deadlocks?", "deadlocks"),
+            ("Do I have any notes on system design", "system design"),
+            ("Are there any notes about fault tolerance?", "fault tolerance"),
+            ("Have I got any notes regarding caching?", "caching"),
+            ("Do I have anything on sharding?", "sharding"),
+        ],
+    )
+    def test_the_topic_is_what_gets_searched(self, utterance, expected_query):
+        parsed = parse_intent(utterance, now=NOW)
+        assert parsed.intent is Intent.SEARCH
+        assert parsed.query == expected_query
