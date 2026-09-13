@@ -85,11 +85,13 @@ class FakeTranscriber:
         self.text = text
         self.avg_logprob = avg_logprob
         self.calls: list[Path] = []
+        self.prompts: list[str | None] = []
 
-    def transcribe(self, audio_path, language=None):
+    def transcribe(self, audio_path, language=None, prompt=None):
         from app.asr.transcriber import TranscriptionResult, TranscriptSegment
 
         self.calls.append(Path(audio_path))
+        self.prompts.append(prompt)
         segments = [
             TranscriptSegment(
                 start=0.0,
