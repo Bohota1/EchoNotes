@@ -53,6 +53,9 @@ class EntityKind(str, Enum):
     DEADLINE = "deadline"
     TASK = "task"
     KEY_PHRASE = "key_phrase"
+    #: A clock time ("3:30 am"), additive for the event-mention reminder
+    #: pathway in app/reminders/clarify.py - see app/understanding/entities.py.
+    TIME = "time"
 
 
 class CaptureSource(str, Enum):
@@ -348,6 +351,66 @@ class Reminder(Base):
     )
 
     note: Mapped[Note | None] = relationship(back_populates="reminders")
+
+
+class PendingReminder(Base):
+    """An event-style reminder ("I have a meeting...") caught mid-sentence,
+    waiting on the date or time the speaker left out.
+
+    Purely additive alongside `Reminder`/`detect_reminders` above: those
+    detect a *task* paired with a date, which "I have a meeting" is not - it
+    has no task verb and no deadline cue, so the existing pathway never sees
+    it. `app/reminders/clarify.py` is the separate, minimal pathway that
+    detects an event mention directly and, when it is missing its date or its
+    time, asks the one question needed and remembers the answer here until it
+    can save a real `Reminder`.
+
+    There is at most one live row at a time: this is a single voice console
+    for one user, not a multi-session server, so the newest un-finalized row
+    is always what the very next captured note answers.
+    """
+
+    __tablename__ = "pending_reminders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(Text)
+    #: ISO date ("2026-09-13") once known, else None.
+    date_iso: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    #: ISO time ("03:30:00") once known, else None.
+    time_iso: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    #: "need_time" | "need_date" - which half is still missing.
+    stage: Mapped[str] = mapped_column(String(20))
+    #: The note whose event mention (or latest answer) started/advanced this.
+    note_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notes.id", ondelete="SET NULL"), nullable=True
+    )
+    #: Naive **local** time on purpose, not `_utcnow()` - `clarify.py`'s
+    #: staleness check compares this against `datetime.now()` (also local),
+    #: same as `Reminder.due_at` elsewhere. Mixing UTC here against a local
+    #: comparison would make every fresh row look hours old on any machine
+    #: whose local clock isn't UTC, so it would get deleted as "stale" and
+    #: dropped almost immediately - the very next answer would then find no
+    #: pending row and get saved as an ordinary note instead of continuing
+    #: the question.
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class ReminderAlert(Base):
+    """Marks a reminder as already spoken by the one-hour-before voice alert
+    (`ReminderService.due_soon`).
+
+    A new table rather than a column on `Reminder`, because `init_db()`
+    (`app/db/session.py`) only creates missing tables - it never alters an
+    existing table's columns - so a new column here would crash on every
+    user's existing database. A new table is always safe to add.
+    """
+
+    __tablename__ = "reminder_alerts"
+
+    reminder_id: Mapped[str] = mapped_column(
+        ForeignKey("reminders.id", ondelete="CASCADE"), primary_key=True
+    )
+    alerted_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class Contact(Base):
