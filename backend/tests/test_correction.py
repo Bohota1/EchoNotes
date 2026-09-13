@@ -229,3 +229,47 @@ class TestUnclearPassages:
         prompt, _ = recording_llm.prompts[0]
         assert "the system steelworks" in prompt
 
+
+class TestQuestionsAreOnlyCorrectedWhenUnsure:
+    """On confident transcripts, question correction did only harm: "notes
+    related to English" became "notes related to linked list", and "Read the
+    whole note" became "What is the whole note?"."""
+
+    QUESTION = "Do I have any notes related to English?"
+
+    @pytest.fixture
+    def recording_llm(self, monkeypatch):
+        client = RecordingClient("Do I have any notes related to linked list?")
+        monkeypatch.setattr("app.llm.get_llm_client", lambda: client)
+        return client
+
+    def test_a_confident_question_is_left_as_heard(self, recording_llm):
+        result = correct_transcript(self.QUESTION, kind="question", unclear=[])
+        assert result.text == self.QUESTION
+        assert result.reason == "recogniser was confident"
+        assert recording_llm.prompts == [], "the LLM was asked anyway"
+
+    def test_an_unsure_question_is_still_corrected(self, recording_llm):
+        correct_transcript(self.QUESTION, kind="question", unclear=[self.QUESTION])
+        assert recording_llm.prompts
+
+    def test_without_confidence_data_the_old_behaviour_stands(self, recording_llm):
+        correct_transcript(self.QUESTION, kind="question")
+        assert recording_llm.prompts
+
+    def test_questions_get_no_lecture_vocabulary(self, recording_llm):
+        correct_transcript(self.QUESTION, kind="question", unclear=[self.QUESTION])
+        prompt, _ = recording_llm.prompts[0]
+        assert "linked list" not in prompt
+
+    def test_notes_still_get_the_vocabulary(self, monkeypatch):
+        client = RecordingClient(REPAIRED)
+        monkeypatch.setattr("app.llm.get_llm_client", lambda: client)
+        correct_transcript(ORIGINAL)
+        prompt, _ = client.prompts[0]
+        assert "linked list" in prompt
+
+    def test_the_model_is_told_a_request_is_not_a_question(self, recording_llm):
+        correct_transcript("Read the whole note.", kind="question", unclear=["Read the whole note."])
+        prompt, _ = recording_llm.prompts[0]
+        assert "is not a question" in prompt
