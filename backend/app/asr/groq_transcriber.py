@@ -59,6 +59,10 @@ logger = logging.getLogger(__name__)
 #: Groq's upload cap for audio transcription.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+#: Groq rejects a longer prompt outright (400 invalid_prompt), which would
+#: send every capture down the slower local fallback.
+MAX_PROMPT_CHARS = 896
+
 _TEMP_PREFIX = "echonotes-asr-"
 
 
@@ -102,14 +106,16 @@ class GroqTranscriber(Transcriber):
 
     # --- public -----------------------------------------------------------
 
-    def transcribe(self, audio_path: Path, language: str | None = None) -> TranscriptionResult:
+    def transcribe(
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
+    ) -> TranscriptionResult:
         audio_path = Path(audio_path)
         if not audio_path.exists():
             # Not a Groq problem, and the local model cannot fix it either.
             raise TranscriptionError(f"audio file not found: {audio_path}")
 
         try:
-            return self._transcribe_remote(audio_path, language)
+            return self._transcribe_remote(audio_path, language, prompt)
         except Exception as exc:  # noqa: BLE001 - every failure has the same answer
             if not get_settings().asr_fallback_to_local:
                 if isinstance(exc, TranscriptionError):
@@ -118,7 +124,9 @@ class GroqTranscriber(Transcriber):
             logger.warning(
                 "Groq transcription failed (%s); transcribing locally instead", exc
             )
-            return self._local().transcribe(audio_path, language=language)
+            # The prompt goes with it: a question keeps its context even when
+            # Groq is unreachable.
+            return self._local().transcribe(audio_path, language=language, prompt=prompt)
 
     # --- internals --------------------------------------------------------
 
@@ -147,7 +155,9 @@ class GroqTranscriber(Transcriber):
         )
         return self._client
 
-    def _transcribe_remote(self, audio_path: Path, language: str | None) -> TranscriptionResult:
+    def _transcribe_remote(
+        self, audio_path: Path, language: str | None, prompt: str | None = None
+    ) -> TranscriptionResult:
         settings = get_settings()
         client = self._get_client()
 
@@ -176,8 +186,10 @@ class GroqTranscriber(Transcriber):
         }
         if language:
             request["language"] = language
-        if settings.groq_asr_use_prompt and settings.whisper_initial_prompt:
-            request["prompt"] = settings.whisper_initial_prompt
+        if prompt:
+            request["prompt"] = prompt[:MAX_PROMPT_CHARS]
+        elif settings.groq_asr_use_prompt and settings.whisper_initial_prompt:
+            request["prompt"] = settings.whisper_initial_prompt[:MAX_PROMPT_CHARS]
 
         response = client.audio.transcriptions.create(**request)
         return self._to_result(response, language)
