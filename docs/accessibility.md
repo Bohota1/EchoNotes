@@ -28,7 +28,16 @@ below it on the page are the same functionality for sighted use.
 | `Space` | Record a note. Press again to stop; the note is transcribed, filed and read back |
 | `Shift` | Open a conversation. Press again to end it |
 | `Enter` | Ask a question. Inside a conversation, follow-ups keep their context |
-| `Escape` | Cancel whatever is in progress |
+
+**No other key does anything.** Tab, Escape, arrows, letters and Backspace are all swallowed. A
+person who cannot see the page cannot tell what an unexpected key did: `Tab` silently moves focus
+onto a button, and the next `Space` then presses that button instead of recording. With three
+keys and nothing else, every press has one meaning wherever focus happens to be.
+
+The keys are caught in the capture phase on the window, before any element sees them, so a focused
+button, link or field cannot claim `Space` or `Enter` first. Combinations held with `Ctrl`, `Alt`
+or the system key pass through: those belong to the browser and the operating system, and blocking
+the few a page can block would only trap the user in the tab.
 
 Both recording keys **toggle**. Hold-to-talk was rejected here: it makes the user keep a finger
 down while thinking, and a key released by accident ends the recording silently.
@@ -62,37 +71,19 @@ design?" is a question and is answered as one.
 
 ## Keyboard map
 
-| Key | Action | Source |
-|---|---|---|
-| `Space` | Record a note, press again to stop - see the voice console above | EchoNotes Feature 1 |
-| `Ctrl+Alt+E` | Edit the focused note (inline field pre-filled with its text) | Idea11y §4.2 |
-| `Ctrl+Alt+M` | Move / re-file the focused note (drop-down of current Topics) | Idea11y §4.2 |
-| `Ctrl+Alt+D` | Delete the focused note, with confirmation | Idea11y §4.2 |
-| `Ctrl+Alt+I` | Note info: type, subject, capture time, source, `Qi` | Idea11y §4.3 note-info shortcut |
-| `Ctrl+Alt+N` | Add a note under the focused Topic | Idea11y §4.2 add button |
-| `Ctrl+Alt+S` | Speak the cluster summary of the focused Topic | Idea11y §4.1 |
-| `Ctrl+Alt+O` | Jump to the Library Overview | Idea11y §4.1 board overview |
-| `Ctrl+Alt+Q` | Ask a question by voice (RAG) | EchoNotes Feature 4 |
-| `Enter` | Submit the inline input | Idea11y §4.2 |
-| `Escape` | Cancel the inline input, stop speech | Idea11y §4.2 |
-| `Ctrl+Alt+.` | Repeat the last announcement | EchoNotes |
-| `Ctrl+Alt+,` | Open settings (voice coding, earcons, verbosity) | Idea11y §4.1a settings |
-
-The `Ctrl+Alt+X` pattern is taken directly from Idea11y, which chose it because it does not
-collide with JAWS or NVDA reserved keys.
+`Space`, `Shift` and `Enter`, as above - and nothing else. An earlier draft of this document listed
+`Ctrl+Alt` shortcuts for editing, moving and deleting notes; none of them were ever built, and
+under the three-key rule none will be.
 
 ### One real conflict to handle: the spacebar
 
 `Space` is the requested trigger, and it is also how a screen reader activates a focused button
-and how browsers scroll a page. Two rules resolve it, in `VoiceConsole.tsx`:
+and how browsers scroll a page.
 
-1. **Never capture `Space` while focus is inside a text input, textarea or `contenteditable`.**
-   Typing a space must type a space.
-2. **Never capture `Space` while focus is on a `button` or a link.** There, `Space` keeps its
-   native activation meaning, or every other control on the page breaks for keyboard users.
-
-Everywhere else - headings, list items, the page background - `Space` starts and stops a
-recording.
+It used to be resolved by stepping aside: `Space` was left alone inside a text field or on a
+focused button. That made its meaning depend on where focus was - something a user who cannot see
+the page has no way to know. It is now resolved the other way: `Space` always records, and nothing
+on the page can take it, because no other key can move focus onto anything that would.
 
 **One component owns the key.** There is one microphone, so there can be one handler. An earlier
 Capture panel bound `Space` on the window as well, and a single press reached both: the panel
