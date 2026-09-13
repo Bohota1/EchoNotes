@@ -39,10 +39,13 @@ logger = logging.getLogger(__name__)
 
 
 def transcribe_audio(
-    audio_path: Path, language: str | None = None
+    audio_path: Path, language: str | None = None, prompt: str | None = None
 ) -> TranscriptionResult:
-    """Stage 2. Isolated so it can be called on its own or faked in tests."""
-    return get_transcriber().transcribe(audio_path, language=language)
+    """Stage 2. Isolated so it can be called on its own or faked in tests.
+
+    A note passes no prompt. A spoken question passes `question_asr_prompt`.
+    """
+    return get_transcriber().transcribe(audio_path, language=language, prompt=prompt)
 
 
 def persist_capture(
