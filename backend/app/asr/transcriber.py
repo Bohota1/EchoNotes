@@ -3,6 +3,8 @@
 `Transcriber` is the interface; `FasterWhisperTranscriber` is the shipped
 implementation. Everything downstream depends on `TranscriptionResult`, so a
 different ASR engine can be dropped in without touching the pipeline.
+`GroqTranscriber` (app/asr/groq_transcriber.py) is one: the same Whisper
+family at large-v3, hosted by Groq, chosen with ASR_BACKEND=groq.
 
 Why faster-whisper: it decodes audio through bundled PyAV rather than an
 external ffmpeg binary, and it reports per-segment `avg_logprob` and
@@ -77,6 +79,24 @@ class TranscriptionResult:
     @property
     def is_empty(self) -> bool:
         return not self.text.strip()
+
+    def unclear_passages(self, logprob_floor: float | None = None) -> list[str]:
+        """The segments the recogniser was least sure of, as text.
+
+        Handed to the LLM correction step as the places a misheard word most
+        likely is. Segments with no score are left out: no evidence of doubt
+        is not evidence of it.
+        """
+        floor = (
+            get_settings().transcript_correction_unclear_logprob
+            if logprob_floor is None
+            else logprob_floor
+        )
+        return [
+            s.text
+            for s in self.segments
+            if s.text and s.avg_logprob is not None and s.avg_logprob < floor
+        ]
 
 
 class Transcriber(abc.ABC):
@@ -562,11 +582,18 @@ _default_transcriber: Transcriber | None = None
 def get_transcriber() -> Transcriber:
     """Process-wide transcriber, so the model is loaded at most once.
 
-    `ASR_PIPELINE` selects between the paper's route and the single-shot call.
+    `ASR_BACKEND` picks the recogniser: "groq" for Groq's hosted large-v3,
+    anything else for the local model. For the local model, `ASR_PIPELINE`
+    selects between the paper's route and the single-shot call.
     """
     global _default_transcriber
     if _default_transcriber is None:
-        if get_settings().asr_pipeline == "direct":
+        settings = get_settings()
+        if (settings.asr_backend or "").strip().lower() == "groq":
+            from app.asr.groq_transcriber import GroqTranscriber
+
+            _default_transcriber = GroqTranscriber()
+        elif settings.asr_pipeline == "direct":
             _default_transcriber = FasterWhisperTranscriber()
         else:
             _default_transcriber = LNTTranscriber()
