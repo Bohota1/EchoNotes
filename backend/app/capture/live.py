@@ -18,6 +18,10 @@ error anywhere. `list.append` is atomic under the GIL, which is all the
 synchronisation handing blocks to `stop()` actually needs. `stop()` closes the
 stream before it touches `_blocks`, so no callback can still be running by then.
 
+**Stopping keeps listening for a moment.** Audio arrives in whole blocks, and
+closing the stream discards the one still being filled - the end of the last
+word, if Enter was pressed as it was spoken. See `stop()`.
+
 One recorder per process, reached through `get_live_recorder()`. There is one
 microphone, so a second concurrent recording is a conflict, not a queue.
 """
@@ -55,6 +59,7 @@ class LiveRecorder:
         self._started_at: float | None = None
         self._started_wall: datetime | None = None
         self._hit_limit = False
+        self._stopping = False
 
     # --- state ----------------------------------------------------------
 
@@ -158,10 +163,25 @@ class LiveRecorder:
 
     def stop(self) -> CapturedAudio:
         """Stop recording and write the audio to disk."""
-        if not self.is_recording:
-            raise AudioCaptureError("no recording is in progress")
+        with self._lock:
+            if not self.is_recording or self._stopping:
+                raise AudioCaptureError("no recording is in progress")
+            self._stopping = True
 
-        stream, self._stream = self._stream, None
+        # Keep listening for a moment before closing. Audio arrives in blocks of
+        # `capture_blocksize` frames (half a second at the default), and closing
+        # the stream throws away the block still being filled - the end of
+        # whatever was said as Enter was pressed. Measured: a question stopped
+        # the instant it was finished lost the tail of its last word, and
+        # "interview" came back as "English".
+        tail = get_settings().capture_stop_tail_seconds
+        try:
+            if tail > 0:
+                time.sleep(tail)
+        finally:
+            stream, self._stream = self._stream, None
+            self._stopping = False
+
         try:
             stream.stop()
             stream.close()
