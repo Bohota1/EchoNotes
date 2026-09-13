@@ -10,7 +10,8 @@ three times:
   "notes related to linked list"; "Read the whole note" became "What is the
   whole note?", which would answer instead of read.
 * **A mishearing was indistinguishable from an empty result.** The question
-  heard was only on screen, which the user cannot see.
+  heard was only on screen, which the user cannot see. The voice console now
+  reads it back before every answer, so the spoken answer must not repeat it.
 """
 
 from __future__ import annotations
@@ -26,8 +27,6 @@ from app.api.v1 import retrieval
 from app.asr.transcriber import TranscriptionResult, TranscriptSegment
 from app.config import get_settings
 from app.rag.intent import Intent
-from app.rag.service import VoiceQueryOutcome
-from app.tts.engine import speak
 
 
 def heard(text: str, logprob: float = -0.2) -> TranscriptionResult:
@@ -35,12 +34,6 @@ def heard(text: str, logprob: float = -0.2) -> TranscriptionResult:
     return TranscriptionResult(
         text=text,
         segments=[TranscriptSegment(0.0, 2.0, text, avg_logprob=logprob, no_speech_prob=0.01)],
-    )
-
-
-def outcome(ok: bool = True, method: str = "llm", spoken: str = "An answer.") -> VoiceQueryOutcome:
-    return VoiceQueryOutcome(
-        intent="ask", ok=ok, spoken=spoken, method=method, speech=speak(spoken)
     )
 
 
@@ -147,36 +140,8 @@ class TestCorrectionNeverChangesTheRequest:
 
 
 # ---------------------------------------------------------------------------
-# saying what was heard
+# over HTTP
 # ---------------------------------------------------------------------------
-
-
-class TestSayingWhatWasHeard:
-    QUESTION = "Do I have any notes related to English?"
-
-    def test_nothing_found_says_what_was_heard(self):
-        reply = outcome(ok=True, method="empty", spoken="I don't have any notes about English.")
-        retrieval._say_what_was_heard(reply, self.QUESTION, heard(self.QUESTION))
-        assert reply.spoken == (
-            "I heard: Do I have any notes related to English. "
-            "I don't have any notes about English."
-        )
-        assert reply.speech.text == reply.spoken, "the spoken directive was not updated"
-
-    def test_a_request_not_understood_says_what_was_heard(self):
-        reply = outcome(ok=False, method="", spoken="I didn't catch that.")
-        retrieval._say_what_was_heard(reply, "asdf", heard("asdf"))
-        assert reply.spoken.startswith("I heard: asdf.")
-
-    def test_an_unsure_hearing_says_what_was_heard_even_with_an_answer(self):
-        reply = outcome()
-        retrieval._say_what_was_heard(reply, self.QUESTION, heard(self.QUESTION, logprob=-0.9))
-        assert reply.spoken.startswith("I heard:")
-
-    def test_a_confident_answer_is_not_prefixed(self):
-        reply = outcome()
-        retrieval._say_what_was_heard(reply, self.QUESTION, heard(self.QUESTION, logprob=-0.2))
-        assert reply.spoken == "An answer."
 
 
 class TestOverHttp:
@@ -198,9 +163,14 @@ class TestOverHttp:
         assert response.status_code == 200, response.text
         return response.json()
 
-    def test_nothing_found_is_said_with_the_question_heard(self, client, fake_transcriber, mic):
+    def test_the_question_comes_back_and_the_answer_does_not_repeat_it(
+        self, client, fake_transcriber, mic
+    ):
+        """The console reads the question back itself. An answer that also
+        began with it would be heard twice."""
         body = self.ask(client, fake_transcriber, "Do I have any notes related to English?")
-        assert body["spoken"].startswith("I heard: Do I have any notes related to English.")
+        assert body["data"]["question"] == "Do I have any notes related to English?"
+        assert not body["spoken"].startswith("I heard")
         assert "about Do I have" not in body["spoken"]
 
     def test_found_notes_are_answered_without_the_prefix(
