@@ -24,6 +24,9 @@ interface Props {
   noteId: string;
 }
 
+
+
+
 export function NoteContentView({ noteId }: Props) {
   const { announce } = useAnnouncer();
 
